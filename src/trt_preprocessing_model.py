@@ -33,10 +33,10 @@ import triton_python_backend_utils as pb_utils
 # Simple hack to support running without installing as a package, so we can import the tokenizer
 from pathlib import Path
 import sys
-wd = Path(__file__).parent.parent.parent.parent.resolve()
+wd = Path(__file__).parent.parent.parent.parent.parent.resolve()
 sys.path.append(str(wd))
 
-from llama3.tokenizer import Tokenizer
+from llama3_libs.tokenizer import Tokenizer
 
 
 class TritonPythonModel:

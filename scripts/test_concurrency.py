@@ -79,14 +79,15 @@ queries = [
 chat_template = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{0}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
-def make_request(stream):
+def make_request(params):
+    stream, print_output, max_gen_len = params
     start_time = time.time()
 
     response = requests.post(
         url="http://localhost:8000/v2/models/ensemble/generate_stream",
         data=json.dumps(
             {
-                "max_tokens": 256,
+                "max_tokens": max(128, max_gen_len),
                 "stop_words": ["<|eot_id|>"],
                 "top_p": 0.7,
                 "stream": stream,
@@ -97,22 +98,26 @@ def make_request(stream):
 
     latency = time.time() - start_time
 
-    for line in response.iter_lines():
-        print(line)
+    if print_output:
+        for line in response.iter_lines():
+            print(line)
 
     return latency
 
 def main(args):
     with Pool(processes=args.num_concurrency) as pool:
-        requests = [args.stream for _ in range(args.num_concurrency)]
+        requests = [(args.stream, args.print_output, args.max_gen_len) for _ in range(args.num_concurrency)]
 
         latencies = []
         for latency in pool.imap(make_request, requests):
             latencies.append(latency)
 
+
+    print(f'Concurrency: {args.num_concurrency}, max_gen_len: {args.max_gen_len}')
     print(f"Average latency: {sum(latencies) / len(latencies):.4f} seconds")
     print(f"Min latency: {min(latencies):.4f} seconds")
     print(f"Max latency: {max(latencies):.4f} seconds")
+    print('\n')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -122,6 +127,14 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--stream", action='store_true', default=False, help="Enable or disable streaming"
+    )
+
+    parser.add_argument(
+        "--print_output", action='store_true', default=False, help="Enable or disable print generated content"
+    )
+
+    parser.add_argument(
+        "--max_gen_len", type=int, default=256, help="Maximum generation token length"
     )
    
     args = parser.parse_args()
