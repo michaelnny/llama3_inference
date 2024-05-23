@@ -59,9 +59,9 @@ sudo systemctl restart docker
 
 # 2. Build an optimized TensorRT-LLM model engine
 
-Before we can serve our LLM model for inference using Triton inference server, we need to build an optimized TensorRT engine (more precisely TensorRT-LLM engine). This process is often a trial-and-error process, which may involve multiple iterations.
+Before we can serve our LLM model for inference using Triton inference server, we need to build an optimized TensorRT engine (more precisely TensorRT-LLM engine). An engine is simple the optimized computation model/graph, along with all the weights. This process is often a trial-and-error process, which may involve multiple iterations.
 
-Please refer to `PART_ONE.md` on how to build a such engine.
+Please refer to `build_llm`, where you can follow the instructions inside `build_llm/README.md` on how to build a optimal TensorRT-LLM engine.
 
 
 
@@ -70,5 +70,5 @@ Please refer to `PART_ONE.md` on how to build a such engine.
 Once we have an complied TensorRT-LLM model engine, we can then deploy the engine to Triton inference server.
 The Triton server will utilize TensorRT-LLM-Backend to serve the engine, along with some preprocessing and postprocessing tasks (text encode and token decode).
 
-Please refer to `PART_TWO.md` on how to deploy the engine with Triton inference server.
+Please refer to `deploy_llm`, where you can follow the instructions inside `deploy_llm/README.md` on how to deploy the engine with Triton inference server.
 

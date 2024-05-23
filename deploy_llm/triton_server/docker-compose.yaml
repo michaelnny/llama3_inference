@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  triton-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: triton-server-image:v24.04
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    network_mode: host
+    shm_size: 2gb
+    volumes:
+      - .:/workspace
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+    working_dir: /workspace
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    command: ["/usr/bin/python3", "start.py", "--model_repo", "/workspace/model_repos/llama3_ifb", "--world_size", "1"]

@@ -1,9 +1,22 @@
 import requests
 import time
-from multiprocessing import Pool
+# from multiprocessing import Pool
+import concurrent.futures
+import numpy as np
 import random
 import json
 import argparse
+import csv
+import os
+
+# Simple hack to support running without installing as a package, so we can import the tokenizer
+from pathlib import Path
+import sys
+wd = Path(__file__).parent.parent.resolve()
+sys.path.append(str(wd))
+
+
+from src.tokenizer import Tokenizer
 
 
 queries = [
@@ -79,50 +92,121 @@ queries = [
 chat_template = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{0}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
-def make_request(params):
-    stream, print_output, max_gen_len = params
+
+
+
+
+def make_request(args):
+    url, stream, max_gen_len, tokenizer_path, print_output = args
+
+    tokenizer = Tokenizer(tokenizer_path)
+    prompt = random.choice(queries)
+
     start_time = time.time()
 
     response = requests.post(
-        url="http://localhost:8000/v2/models/ensemble/generate_stream",
-        data=json.dumps(
-            {
+        url=url,
+        data=json.dumps({
                 "max_tokens": max(128, max_gen_len),
                 "stop_words": ["<|eot_id|>"],
                 "top_p": 0.7,
                 "stream": stream,
-                "text_input": chat_template.format(random.choice(queries)),
-            }
-        ),
+                "text_input": chat_template.format(prompt),
+            }),
+        headers={
+            "Content-Type": "application/json",
+        }
     )
 
-    latency = time.time() - start_time
+    total_time = time.time() - start_time
+
+    response_text = response.content.decode('utf-8')
+    # print(response_text)
+
+    if response_text.startswith("data: "):
+        # Strip the 'data: ' prefix
+        response_text = response_text[len("data: "):].strip()
+
+    response_json = json.loads(response_text)
+
+    answer = response_json['text_output']
+
+    out_ids = tokenizer.encode(answer, allowed_special='all')
+    num_out_tokens = len(out_ids)
 
     if print_output:
-        for line in response.iter_lines():
-            print(line)
+        print('-'*60)
+        print(f'INPUT TEXT: {prompt}')
+        print(f'OUTPUT TEXT: {answer}')
+        print('\n')
 
-    return latency
+    return total_time, num_out_tokens
 
-def main(args):
-    with Pool(processes=args.num_concurrency) as pool:
-        requests = [(args.stream, args.print_output, args.max_gen_len) for _ in range(args.num_concurrency)]
+
+
+def run_tests(args, concurrency):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+        requests = [(args.url, args.stream, args.max_gen_len, args.tokenizer_path, args.print_output) for _ in range(concurrency)]
 
         latencies = []
-        for latency in pool.imap(make_request, requests):
+        num_tokens = []
+        futures = [executor.submit(make_request, req) for req in requests]
+
+        for future in concurrent.futures.as_completed(futures):
+            latency, token_count = future.result()
             latencies.append(latency)
+            num_tokens.append(token_count)
+
+    latencies = np.array(latencies)
+    p50 = np.percentile(latencies, 50)
+    p70 = np.percentile(latencies, 70)
+    p90 = np.percentile(latencies, 90)
+    p99 = np.percentile(latencies, 99)
+
+    token_rate = np.sum(num_tokens) / np.sum(latencies)
+
+    return {
+        'concurrency': concurrency,
+        'max_gen_len': args.max_gen_len,
+        'token_rate': token_rate,
+        'p50_latency': p50,
+        'p70_latency': p70,
+        'p90_latency': p90,
+        'p99_latency': p99
+    }
 
 
-    print(f'Concurrency: {args.num_concurrency}, max_gen_len: {args.max_gen_len}')
-    print(f"Average latency: {sum(latencies) / len(latencies):.4f} seconds")
-    print(f"Min latency: {min(latencies):.4f} seconds")
-    print(f"Max latency: {max(latencies):.4f} seconds")
-    print('\n')
+
+def main(args):
+
+    # Define your concurrency range
+    concurrency_range = range(2, args.max_concurrency+1, 2)  # range from 2 to N, with step size 2
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
+
+    with open(args.output_csv, 'w', newline='') as csvfile:
+        # header columns
+        fieldnames = ['concurrency', 'max_gen_len', 'token_rate', 'p50_latency', 'p70_latency', 'p90_latency', 'p99_latency']
+        csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        csv_writer.writeheader()
+
+        for concurrency in concurrency_range:
+            result = run_tests(args, concurrency)
+            csv_writer.writerow(result)
+            csvfile.flush()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--num_concurrency", type=int, default=8, help="Number of concurrent requests"
+        "--url", type=str, default='http://localhost:8000/v2/models/ensemble/generate_stream', help="Triton server URL"
+    )
+    parser.add_argument(
+        "--tokenizer_path", type=str, default='./src/tokenizer.model', help=""
+    )
+    parser.add_argument(
+        "--max_concurrency", type=int, default=32, help="Maximum number of concurrent requests"
     )
 
     parser.add_argument(
@@ -132,9 +216,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--print_output", action='store_true', default=False, help="Enable or disable print generated content"
     )
+    parser.add_argument(
+        "--output_csv", type=str, default='./logs/concurrency_performance_results.csv'
+    )
 
     parser.add_argument(
-        "--max_gen_len", type=int, default=256, help="Maximum generation token length"
+        "--max_gen_len", type=int, default=128, help="Maximum generation token length"
     )
    
     args = parser.parse_args()

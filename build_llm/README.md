@@ -15,87 +15,69 @@ You need to make sure your host machine has Docker runtime and NVIDIA Container 
 - Install NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html
 
 
-## Build the Docker container for TensorRT-LLM
-
-We start by pulling the NVIDIA CUDA docker image, on your host machine, run the following command to pull the container. Once finished, it will open a new shell runtime of the container.
-
-```bash
-
-# Obtain and start the basic docker image environment (optional).
-docker run --rm --runtime=nvidia --gpus all --entrypoint /bin/bash -it nvidia/cuda:12.1.0-devel-ubuntu22.04
-
-```
-
-Inside the shell runtime f the container, run the following command to install required packages.
-```bash
-# Install dependencies, TensorRT-LLM requires Python 3.10
-apt-get update && apt-get -y install python3.10 python3-pip openmpi-bin libopenmpi-dev git
-
-
-pip3 install tensorrt_llm==0.9.0 -U --extra-index-url https://pypi.nvidia.com
-
-
-# Check installation
-python3 -c "import tensorrt_llm"
-
-
-# Optional, install Tiktoken tokenizer and other packages for evaluation runs
-pip3 install tiktoken blobfile datasets evaluate rouge_score sentencepiece
-
-```
-
-
-Persistent the changes we made to the docker image, so we can reuse it later in the project. On your host machine, open a new terminal and run the following command:
-```bash
-
-# Find the docker instance id of the last active instance
-docker ps -a -q
-84380f5a9475
-
-# Create a new image and save the changes
-docker commit 84380f5a9475 tensorrtllm-image:v0.9.0
-
-```
-
-We can then use the following command to load the newly created docker image
-```bash
-
-docker run --rm --gpus all --entrypoint /bin/bash -it tensorrtllm-image:v0.9.0
-
-```
-
-
 
 ## Prepare TensorRT-LLM workspace
 
-**All commands in this section should be executed on the host machine**
+The TensorRT-LLM project contains additional script to do testing and benchmarking, where you can't find inside the `pip` installed package. On your host machine, clone the TensorRT-LLM project, notice here we use the same version (v0.9.0) as we will install the package inside the container (specified in the Dockerfile).
 
-On your host machine, clone the TensorRT-LLM project, then mount it to the container, together with the llama3 model checkpiints
 ```bash
 
-# Clone the TensorRT-LLM repository to build for benchmarks
-sudo zypper install git-lfs
-
-cd ~/
-
+cd ~/dl_projects
 
 git clone -b v0.9.0 https://github.com/NVIDIA/TensorRT-LLM.git
 
+```
+
+Now lets copy some custom testing scripts to the examples folder inside the TensorRT-LLM project, these custom scripts are adjusted to use native tiktoken tokenizer.
+```bash
+
 cd TensorRT-LLM
 
-
 # Copy our custom testing code to the TensorRT-LLM workspace
-cp -r ~/dl_projects/llama3_inference/src/tokenizer.py ./examples
-cp -r ~/dl_projects/llama3_inference/src/run_llama3.py ./examples
-cp -r ~/dl_projects/llama3_inference/src/dolly-15k.jsonl ./examples
+cp -r ~/dl_projects/llama3_inference/build_llm/src/tokenizer.py ./examples
+cp -r ~/dl_projects/llama3_inference/build_llm/src/run_llama3.py ./examples
+cp -r ~/dl_projects/llama3_inference/build_llm/src/dolly-15k.jsonl ./examples
 
 
-# Notice as of May 2024, the v0.9.0 has multiple bugs when try to build model engine for llama3, later we need to replace the model class
-cp -r ~/dl_projects/llama3_inference/src/trtllm_v0.9.0_llama_model.py ./tensorrt_llm/models/llama/model.py
+# Notice as of May 2024, the v0.9.0 has multiple bug of using fixed vocab size inside the model class
+cp -r ~/dl_projects/llama3_inference/build_llm/src/trtllm_v0.9.0_llama_model.py ./tensorrt_llm/models/llama/model.py
+
+``` 
 
 
-# Start container with TensorRT-LLM workspace and llama3 checkpoint volumes mounted
-docker run --rm --gpus all --volume ${PWD}:/workspace --volume /home/michael/models/Llama3:/checkpoints --entrypoint /bin/bash -it --workdir /workspace tensorrtllm-image:v0.9.0
+## Build the Docker container for TensorRT-LLM
+
+We start by pulling the NVIDIA CUDA docker image, the process are maintained inside the `build_llm/Dockerfile`. On your host machine, navigate to `build_llm` folder, and run the following command to build the TensorRT-LLM container and save it to a image called `tensorrtllm-image:v0.9.0`.
+
+```bash
+
+# Build the Docker image with the custom name
+docker-compose build
+
+
+# Or we can use docker build to manually specify the name
+docker build -t tensorrtllm-image:v0.9.0 .
+
+```
+
+
+## Launch TensorRT-LLM container
+
+We can then launch the container using `docker-compose run` command, notice we need to maintain the volume paths for the `TensorRT-LLM v0.9.0` project and the `llama3 checkpoints` inside the `docker-compose.yaml` file.
+```bash
+
+docker-compose run --rm tensorrtllm
+
+```
+
+Or we can start the container directly use `docker run`, as shown in this example:
+```bash
+
+docker run --rm --gpus all --volume ${PWD}:/workspace \
+    --volume /home/michael/dl_projects/TensorRT-LLM:/TensorRT-LLM \
+    --volume /home/michael/models/Llama3:/checkpoints \
+    --entrypoint /bin/bash -it --workdir /TensorRT-LLM \
+    tensorrtllm-image:v0.9.0
 
 ```
 
@@ -104,23 +86,17 @@ docker run --rm --gpus all --volume ${PWD}:/workspace --volume /home/michael/mod
 
 **All commands in this section should be executed inside the TensorRT-LLM container**
 
-Fix vocab size incorrect bug in v0.9.0
-```bash
 
-cp ./tensorrt_llm/models/llama/model.py /usr/local/lib/python3.10/dist-packages/tensorrt_llm/models/llama/model.py
-
-```
-
-To build the TensorRT engine, we first need to convert the regular llama model checkpoint to a TensorRT-LLM compatible format.
-The `examples/llama/convert_checkpoint.py` file can be used to do this.
+To build the TensorRT engine, we first need to convert the regular llama3 model checkpoint to a TensorRT-LLM compatible format.
+The `TensorRT-LLM/examples/llama/convert_checkpoint.py` file can be used to do this.
 
 
-The following command will load the original Meta llama model checkpoint from `checkpoints/Meta-Llama-3-8B-Instruct`, convert to `bfloat16`, and save the files to `/checkpoints/trtllm-Llama-3-8B-Instruct-1gpu-bf16` so we can later us it to build the TensorRT engine.
+The following command will load the original Meta llama model checkpoint from `/checkpoints/Meta-Llama-3-8B-Instruct`, convert to `bfloat16`, and save the files to `/workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16` so we can later us it to build the TensorRT engine.
 
 
 ```bash
 python3 examples/llama/convert_checkpoint.py --meta_ckpt_dir /checkpoints/Meta-Llama-3-8B-Instruct \
-            --output_dir ./tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
+            --output_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
             --dtype bfloat16 \
             --tp_size 1 
 
@@ -137,8 +113,8 @@ We can then build the TensorRT-LLM model engine using the converted checkpoint f
 Note if using v0.8.0 version, we may need to remove `--gemm_plugin` option in order to use in-flight batching. 
 
 ```bash
-trtllm-build --checkpoint_dir ./tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
-            --output_dir ./tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
+trtllm-build --checkpoint_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
+            --output_dir /workspace/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
             --paged_kv_cache enable \
             --context_fmha enable \
             --remove_input_padding enable \
@@ -226,31 +202,25 @@ To manually test the engine, run the following command inside the container.
 # Ask a simple question
 python3 examples/run_llama3.py --max_output_len=256 \
                   --tokenizer_dir /checkpoints/Meta-Llama-3-8B-Instruct \
-                  --engine_dir ./tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
-                  --input_text "Can you explain what's a black box?"
+                  --engine_dir /workspace/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
+                  --input_text "Can you explain in simple words what's a black box?"
     
 
 
 
 Input [Text 0]: "<|begin_of_text|><|start_header_id|>user<|end_header_id|>
 
-Can you explain what's a black box?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+Can you explain in simple words what's a black box?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
 "
-Output [Text 0 Beam 0]: "The infamous "black box"!
+Output [Text 0 Beam 0]: "A "black box" is a term used to describe a system, process, or device that is mysterious or unknown, and its inner workings are not easily understood or visible.
 
-In various contexts, a black box refers to a system, device, or process that is difficult to understand, analyze, or reverse-engineer because its internal workings are not transparent or well-documented. The term "black box" is often used to describe something that is:
+Imagine a box that you can't open or see inside. You can't see what's happening inside the box, but you can see what's happening outside the box. For example, you might put a toy car into the box and then close the lid. When you open the box again, you might find that the toy car has changed shape or color. But you wouldn't know how it got that way, because you can't see what's happening inside the box.
 
-1. **Opaque**: Its internal mechanisms are not easily observable or understandable.
-2. **Complex**: It has many interacting components or processes that are hard to comprehend.
-3. **Mysterious**: Its behavior or output is not easily predictable or explainable.
+In the same way, a black box in technology or science is a system that takes in some input (like data or a signal), does something to it, and then produces an output (like a result or a response). But the exact steps that the system takes to get from the input to the output are unknown or not easily understood.
 
-Here are some examples of black boxes:
+For example, a black box might be a complex computer program that takes in some data and produces a prediction or recommendation. You might be able to use the program and get useful results, but you wouldn't know exactly how it's making those predictions or recommendations, because the inner workings of the"
 
-1. **Computer programming**: A black box in programming refers to a piece of code or a software component that is difficult to understand or modify because its internal workings are not well-documented or are proprietary.
-2. **Machine learning**: A black box in machine learning refers to a model or algorithm that is difficult to interpret or understand because its internal workings are complex and not easily explainable.
-3. **Electronics**: A black box in electronics refers to a device or circuit that is difficult to understand or repair because its internal components or wiring are not easily accessible or are proprietary.
-4. **Business**: A black box in business refers to a company or organization that is difficult"
 
 ```
 
@@ -262,10 +232,9 @@ We can also run the test on a predefined dataset, by give the `--input_file`, no
 # Run with a prompt dataset
 python3 examples/run_llama3.py --max_output_len=256 \
                   --tokenizer_dir /checkpoints/Meta-Llama-3-8B-Instruct \
-                  --engine_dir ./tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
+                  --engine_dir /workspace/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
                   --input_file examples/dolly-15k.jsonl \
-                  --max_samples 64 \
-                  --random_sample
+                  --max_samples 64 
 
 
 

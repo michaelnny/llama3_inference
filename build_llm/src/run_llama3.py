@@ -227,8 +227,9 @@ def parse_input(tokenizer,
             
             if max_samples > 1 and len(batch_input_ids) > max_samples:
                 if random_sample:
-                    random.shuffle(batch_input_ids)
-                batch_input_ids = batch_input_ids[:max_samples]
+                    batch_input_ids = random.sample(batch_input_ids, max_samples)
+                else:
+                    batch_input_ids = batch_input_ids[:max_samples]
 
             # left pad batch
             max_len = max([len(ids) for ids in batch_input_ids])
