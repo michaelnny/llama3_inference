@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   tensorrtllm:
     build:
@@ -16,8 +14,6 @@ services:
               capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - https_proxy=http://172.17.0.1:1081
-      - http_proxy=http://172.17.0.1:1081
     volumes:
       - ${PWD}:/workspace   # `build_llm` workspace
       - /home/michael/dl_projects/TensorRT-LLM:/TensorRT-LLM  # TensorRT-LLM project codebase

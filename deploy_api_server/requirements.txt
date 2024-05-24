@@ -5,3 +5,5 @@ uvicorn
 shortuuid
 protobuf
 numpy
+tiktoken
+blobfile

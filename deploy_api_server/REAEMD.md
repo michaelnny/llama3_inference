@@ -5,10 +5,25 @@ To start build the container for the FastAPI server, run the following command o
 
 ```bash
 
-cd api_server
+cd deploy_api_server
 
 docker-compose build
 
+```
+
+Then start the server:
+
+```bash
+
+docker-compose up
+
+
+# Or run in detached mode
+docker-compose up -d
+
+
+# Incase want to open interactive command, here 'api-server' is the service name inside the 'docker-compose.yaml' file
+docker-compose run --rm api-server
 
 ```
 

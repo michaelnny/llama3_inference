@@ -7,5 +7,4 @@ services:
     ports:
       - "3000:3000"
     working_dir: /app
-    # entrypoint: ["/bin/bash"]
     command: ["python3", "main.py", "--triton-server-url", "172.17.0.1:8001"]

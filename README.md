@@ -65,16 +65,25 @@ Please refer to `build_llm`, where you can follow the instructions inside `build
 
 
 
-# 3. Serve the TensorRT-LLM model engine using Triton inference server
+# 3. Deploy the TensorRT-LLM model engine to Triton inference server
 
 Once we have an complied TensorRT-LLM model engine, we can then deploy the engine to Triton inference server.
 The Triton server will utilize TensorRT-LLM-Backend to serve the engine, along with some preprocessing and postprocessing tasks (text encode and token decode).
 
-Please refer to `deploy_llm`, where you can follow the instructions inside `deploy_llm/README.md` on how to deploy the engine with Triton inference server.
+Please refer to `deploy_triton_server`, where you can follow the instructions inside `deploy_triton_server/README.md` on how to deploy the engine with Triton inference server.
 
 
 
-# 4. Test the deployment
+# 4. Deploy API Gateway server
+
+Since the Triton inference server focus on low-level computation and optimization, it does not provide a very easy to use API, especially if we want to use openAI API's client to connect to our system.
+
+To solve this issue, we create a simple API gateway server using FastAPI, which provide similar API design to the openAI API.
+
+Please refer to `deploy_triton_server`, where you can follow the instructions inside `deploy_api_server/README.md` on how to deploy the API gateway server based on FastAPI for openAI API compatibilities.
+
+
+# 5. Test the deployment
 
 
 To test the deployment, we can use a very simple streamlit UI to check the connection and API compatibilities.

@@ -31,7 +31,7 @@ On your host machine, navigate to `deploy_llm` folder.
 
 ```bash
 
-cd deploy_llm/triton_server/app
+cd deploy_triton_server/app
 
 # Llama3 inflight batching model repository
 mkdir -p model_repos/llama3_ifb
@@ -82,7 +82,7 @@ LLAMA_CKPT_DIR=/app/llama3_libs
 ENGINE_PATH=/app/model_repos/llama3_ifb/tensorrt_llm/1
 
 
-cd deploy_llm/triton_server
+cd deploy_triton_server
 
 
 # Update preprocessing model config
@@ -119,7 +119,7 @@ Now, we can try to pull the Triton docker image and launch our inference server
 
 ```bash
 
-cd deploy_llm/triton_server
+cd deploy_triton_server
 
 # Build the Docker image with the custom name
 docker-compose build
@@ -133,7 +133,7 @@ docker-compose build --no-cache
 Now try to exist the Triton docker container and relaunch:
 ```bash
 
-cd deploy_llm/triton_server
+cd deploy_triton_server
 
 
 docker-compose up
@@ -436,7 +436,7 @@ On the host machine or other client, run the following command to do a quick con
 
 ```bash
 
-cd deploy_llm/triton_server
+cd deploy_triton_server
 
 
 # Run concurrency benchmark tests
