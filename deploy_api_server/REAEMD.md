@@ -1,5 +1,6 @@
 # FastAPI API server for openAI API compatabilities
 
+## Build Docker container
 
 To start build the container for the FastAPI server, run the following command on the host machine.
 
@@ -11,21 +12,27 @@ docker-compose build
 
 ```
 
-Then start the server:
+## Start API server
+
+We can use the following command to start the container
 
 ```bash
 
-docker-compose up
+cd deploy_api_server
 
+docker-compose up
 
 # Or run in detached mode
 docker-compose up -d
-
 
 # Incase want to open interactive command, here 'api-server' is the service name inside the 'docker-compose.yaml' file
 docker-compose run --rm api-server
 
 ```
+
+## Test the API server
+
+We can then test the API server by run the following command in the host machine
 
 ```bash
 
@@ -38,5 +45,18 @@ curl http://localhost:3000/v1/chat/completions \
      "stream": true
    }'
 
+
+```
+
+To further test the API server's compatibilities, we can use a very simple streamlit UI to check the connection and openAI API compatibilities.
+
+On your host machine, install streamlit and then launch the demo UI:
+
+```bash
+
+pip3 install streamlit openai
+
+
+streamlit run demo_ui.py
 
 ```

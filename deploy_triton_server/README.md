@@ -1,21 +1,17 @@
 # Deploy a TensorRT-LLM model engine to Triton inference server
 
-
 **Prerequisites**
 
 You need to make sure your host machine has Docker runtime and NVIDIA Container Toolkit installed.
+
 - Install Docker on OpenSuse: https://en.opensuse.org/Docker
 - Install NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html
 
 You need to have a working TensorRT-LLM model engine.
 
-
-
-
 ## Prepare TensorRT-LLM-Backend for Triton Inference Server
 
 On the host machine, clone the TensorRT-LLM backend repository to a temporary location, make sure we're on the same release as the one we use to build TensorRT-LLM engine.
-
 
 ```bash
 
@@ -67,7 +63,6 @@ cp ~/dl_projects/tensorrtllm_backend/scripts/launch_triton_server.py ./start.py
 
 ```
 
-
 Now we need to update the `config.pbtxt` files for the different models in the `model_repos/llama3_ifb` folder. Specifically, we need to set the location of the tokenizer checkpoint, and location of the TensorRT-LLM model engine, amount other things like maximum batch size etc.
 
 On the host machine, use the following command to update these properties. Note the script `src/fill_template.py` was copied from the `tensorrtllm_backend` project, which was located at `tensorrtllm_backend/tools/fill_template.py`.
@@ -110,12 +105,9 @@ python3 src/fill_template.py -i app/model_repos/llama3_ifb/tensorrt_llm/config.p
 
 ```
 
-
-
 ## Launch Triton inference server container
 
 Now, we can try to pull the Triton docker image and launch our inference server
-
 
 ```bash
 
@@ -129,8 +121,8 @@ docker-compose build --no-cache
 
 ```
 
-
 Now try to exist the Triton docker container and relaunch:
+
 ```bash
 
 cd deploy_triton_server
@@ -148,7 +140,6 @@ docker-compose run --rm triton-server
 
 ```
 
-
 Once the container is up and running, it will automatically launch the Triton inference server, and you should be able to see the output look like this.
 
 ```bash
@@ -163,7 +154,7 @@ ba5a4a84f245   triton-server-image:v24.04   "/opt/nvidia/nvidia_…"   16 minute
 docker logs ba5a4a84f245
 
 
-I0522 14:51:21.484246 381 server.cc:634] 
+I0522 14:51:21.484246 381 server.cc:634]
 +-------------+----------------------------------------------+----------------------------------------------+
 | Backend     | Path                                         | Config                                       |
 +-------------+----------------------------------------------+----------------------------------------------+
@@ -180,7 +171,7 @@ I0522 14:51:21.484246 381 server.cc:634]
 |             |                                              |                                              |
 +-------------+----------------------------------------------+----------------------------------------------+
 
-I0522 14:51:21.485254 381 server.cc:677] 
+I0522 14:51:21.485254 381 server.cc:677]
 +------------------+---------+--------+
 | Model            | Version | Status |
 +------------------+---------+--------+
@@ -193,7 +184,7 @@ I0522 14:51:21.485254 381 server.cc:677]
 
 I0522 14:51:21.500442 381 metrics.cc:877] Collecting metrics for GPU 0: NVIDIA GeForce RTX 3090
 I0522 14:51:21.502515 381 metrics.cc:770] Collecting CPU metrics
-I0522 14:51:21.502673 381 tritonserver.cc:2538] 
+I0522 14:51:21.502673 381 tritonserver.cc:2538]
 +----------------------------------+------------------------------------------------------------------------+
 | Option                           | Value                                                                  |
 +----------------------------------+------------------------------------------------------------------------+
@@ -220,7 +211,6 @@ I0522 14:51:21.549483 381 http_server.cc:362] Started Metrics Service at 0.0.0.0
 
 ```
 
-
 We can check if the server is up and running
 
 ```bash
@@ -237,7 +227,6 @@ curl -v localhost:8000/v2/health/ready
 
 
 ```
-
 
 ## Test runs
 
@@ -256,7 +245,7 @@ curl -H "Content-Type: application/json" \
     }'
 
 
-# # Output 
+# # Output
 {
     "context_logits": 0.0,
     "cum_log_probs": 0.0,
@@ -279,8 +268,8 @@ curl -H "Content-Type: application/json" \
 
 ```
 
-
 We can try to add the proper chat template format to the text, which gives much better results.
+
 ```bash
 
 curl -H "Content-Type: application/json" \
@@ -317,8 +306,8 @@ curl -H "Content-Type: application/json" \
 
 ```
 
-
 Run more test
+
 ```bash
 
 
@@ -358,16 +347,16 @@ curl -H "Content-Type: application/json" \
 
 Streaming API
 
-
 To use the streaming API, we need to set the following properties inside the `tensorrt_llm\config.pbtxt`.
+
 ```
 model_transaction_policy {
   decoupled: True
 }
 ```
 
-
 We can then run the test using this command:
+
 ```bash
 
 
@@ -427,9 +416,6 @@ data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_n
 
 ```
 
-
-
-
 ## Benchmark the Triton inference server
 
 On the host machine or other client, run the following command to do a quick concurrency test:
@@ -447,7 +433,6 @@ python3 scripts/benchmark_concurrency.py --max_gen_len 256
 python3 scripts/plot_concurrency_results.py
 
 ```
-
 
 We can monitor the status by open a new terminal on the host machine and run the following command to query the Triton server metrics
 

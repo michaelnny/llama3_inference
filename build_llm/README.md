@@ -11,10 +11,9 @@ To get started, we first need to install the TensorRT-LLM package, it's recommen
 **Prerequisites**
 
 You need to make sure your host machine has Docker runtime and NVIDIA Container Toolkit installed.
+
 - Install Docker on OpenSuse: https://en.opensuse.org/Docker
 - Install NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/index.html
-
-
 
 ## Prepare TensorRT-LLM workspace
 
@@ -29,6 +28,7 @@ git clone -b v0.9.0 https://github.com/NVIDIA/TensorRT-LLM.git
 ```
 
 Now lets copy some custom testing scripts to the examples folder inside the TensorRT-LLM project, these custom scripts are adjusted to use native tiktoken tokenizer.
+
 ```bash
 
 cd TensorRT-LLM
@@ -42,8 +42,7 @@ cp -r ~/dl_projects/llama3_inference/build_llm/src/dolly-15k.jsonl ./examples
 # Notice as of May 2024, the v0.9.0 has multiple bug of using fixed vocab size inside the model class
 cp -r ~/dl_projects/llama3_inference/build_llm/src/trtllm_v0.9.0_llama_model.py ./tensorrt_llm/models/llama/model.py
 
-``` 
-
+```
 
 ## Build the Docker container for TensorRT-LLM
 
@@ -60,10 +59,10 @@ docker build -t tensorrtllm-image:v0.9.0 .
 
 ```
 
-
 ## Launch TensorRT-LLM container
 
 We can then launch the container using `docker-compose run` command, notice we need to maintain the volume paths for the `TensorRT-LLM v0.9.0` project and the `llama3 checkpoints` inside the `docker-compose.yaml` file.
+
 ```bash
 
 docker-compose run --rm tensorrtllm
@@ -71,6 +70,7 @@ docker-compose run --rm tensorrtllm
 ```
 
 Or we can start the container directly use `docker run`, as shown in this example:
+
 ```bash
 
 docker run --rm --gpus all --volume ${PWD}:/workspace \
@@ -81,24 +81,20 @@ docker run --rm --gpus all --volume ${PWD}:/workspace \
 
 ```
 
-
 ## Build TensorRT-LLM model engine
 
 **All commands in this section should be executed inside the TensorRT-LLM container**
 
-
 To build the TensorRT engine, we first need to convert the regular llama3 model checkpoint to a TensorRT-LLM compatible format.
 The `TensorRT-LLM/examples/llama/convert_checkpoint.py` file can be used to do this.
 
-
 The following command will load the original Meta llama model checkpoint from `/checkpoints/Meta-Llama-3-8B-Instruct`, convert to `bfloat16`, and save the files to `/workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16` so we can later us it to build the TensorRT engine.
-
 
 ```bash
 python3 examples/llama/convert_checkpoint.py --meta_ckpt_dir /checkpoints/Meta-Llama-3-8B-Instruct \
             --output_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
             --dtype bfloat16 \
-            --tp_size 1 
+            --tp_size 1
 
 
 
@@ -107,10 +103,9 @@ python3 examples/llama/convert_checkpoint.py --meta_ckpt_dir /checkpoints/Meta-L
 Total time of converting checkpoints: 00:00:20
 ```
 
-
 We can then build the TensorRT-LLM model engine using the converted checkpoint from the above step. We may have to try different configurations to build the optimal engine depending on the environment. You can refer to the `benchmark section` to evaluate the performance of an TensorRT-LLM model engine.
 
-Note if using v0.8.0 version, we may need to remove `--gemm_plugin` option in order to use in-flight batching. 
+Note if using v0.8.0 version, we may need to remove `--gemm_plugin` option in order to use in-flight batching.
 
 ```bash
 trtllm-build --checkpoint_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf16 \
@@ -151,7 +146,7 @@ trtllm-build --checkpoint_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf1
 [05/22/2024-14:16:52] [TRT-LLM] [I] Set multiple_profiles to False.
 [05/22/2024-14:16:52] [TRT-LLM] [I] Set paged_state to True.
 [05/22/2024-14:16:52] [TRT-LLM] [I] Set streamingllm to False.
-[05/22/2024-14:16:52] [TRT-LLM] [W] remove_input_padding is enabled, while opt_num_tokens is not set, setting to max_batch_size*max_beam_width. 
+[05/22/2024-14:16:52] [TRT-LLM] [W] remove_input_padding is enabled, while opt_num_tokens is not set, setting to max_batch_size*max_beam_width.
 
 [05/22/2024-14:16:52] [TRT-LLM] [W] Fail to infer cluster key, use A100-SXM-80GB as fallback.
 [05/22/2024-14:16:52] [TRT] [I] [MemUsageChange] Init CUDA: CPU +14, GPU +0, now: CPU 167, GPU 269 (MiB)
@@ -192,7 +187,6 @@ trtllm-build --checkpoint_dir /workspace/tmp/trtllm-Llama-3-8B-Instruct-1gpu-bf1
 
 ```
 
-
 ## Test TensorRT-LLM model engine
 
 To manually test the engine, run the following command inside the container.
@@ -204,7 +198,7 @@ python3 examples/run_llama3.py --max_output_len=256 \
                   --tokenizer_dir /checkpoints/Meta-Llama-3-8B-Instruct \
                   --engine_dir /workspace/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
                   --input_text "Can you explain in simple words what's a black box?"
-    
+
 
 
 
@@ -224,8 +218,7 @@ For example, a black box might be a complex computer program that takes in some 
 
 ```
 
-
-We can also run the test on a predefined dataset, by give the `--input_file`, notice the file must be a valid `jsonl` file, where each row is a complete sample dict, and has the `instruct` property. 
+We can also run the test on a predefined dataset, by give the `--input_file`, notice the file must be a valid `jsonl` file, where each row is a complete sample dict, and has the `instruct` property.
 
 ```bash
 
@@ -234,7 +227,7 @@ python3 examples/run_llama3.py --max_output_len=256 \
                   --tokenizer_dir /checkpoints/Meta-Llama-3-8B-Instruct \
                   --engine_dir /workspace/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16 \
                   --input_file examples/dolly-15k.jsonl \
-                  --max_samples 64 
+                  --max_samples 64
 
 
 
@@ -288,16 +281,14 @@ Potato chips, like many other snack foods, can become stale or stale after openi
 
 ```
 
-
 ## Benchmark TensorRT-LLM model engine
 
-
 **Note**
-
 
 Before start run benchmark, we need to add the llama3 model configuration to `benchmarks/python/allowed_configs.py`
 
 Here's an example of the llama3 7B model, you can fine the parameters inside `config.json` located at the engine dir.
+
 ```python
 
 
@@ -321,6 +312,7 @@ Here's an example of the llama3 7B model, you can fine the parameters inside `co
 ```
 
 Inside the container, run the following command to benchmark the engine
+
 ```bash
 
 cd benchmarks/python
@@ -333,7 +325,7 @@ python3 benchmark.py --model llama3_7b \
                 --max_input_len 128 \
                 --max_output_len 256 \
                 --input_output_len "128,256" \
-                --dtype bfloat16 
+                --dtype bfloat16
 
 
 # Or we can run a series of tests to compare the performance on different batch size
@@ -351,6 +343,5 @@ do
 done
 
 ```
-
 
 We can then check the results in the csv file. Depend on the result, we may need to repeat the `build engine -> benchmark` process until we have find a good model engine. Then we can move on to deploy the model engine to Triton inference server.

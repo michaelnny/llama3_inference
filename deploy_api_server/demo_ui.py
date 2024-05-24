@@ -18,8 +18,8 @@ if prompt:
     chat_completion = client.chat.completions.create(
         stream=True,
         messages=st.session_state["messages"],
-        model="ensemble", # Must be ensemble
-        max_tokens=512
+        model="ensemble",  # Must be ensemble
+        max_tokens=512,
     )
     response = ""
     for event in chat_completion:
