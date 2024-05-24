@@ -17,7 +17,7 @@ services:
     network_mode: host
     shm_size: 2gb
     volumes:
-      - .:/workspace
+      - ${PWD}:/workspace # use '.:/workspace' if copy the workspace inside the Dockerfile
     ports:
       - "8000:8000"
       - "8001:8001"

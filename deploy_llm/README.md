@@ -110,7 +110,7 @@ python3 src/fill_template.py -i triton_server/model_repos/llama3_ifb/ensemble/co
 
 # Update TensorRT-LLM model config
 python3 src/fill_template.py -i triton_server/model_repos/llama3_ifb/tensorrt_llm/config.pbtxt \
-        triton_backend:tensorrtllm,triton_max_batch_size:64,decoupled_mode:true,max_beam_width:1,engine_dir:${ENGINE_PATH},max_tokens_in_paged_kv_cache:2560,max_attention_window_size:2560,kv_cache_free_gpu_mem_fraction:0.25,exclude_input_in_output:true,enable_kv_cache_reuse:false,batching_strategy:inflight_fused_batching,batch_scheduler_policy:guaranteed_completion,max_queue_delay_microseconds:5000
+        triton_backend:tensorrtllm,triton_max_batch_size:64,decoupled_mode:true,max_beam_width:1,engine_dir:${ENGINE_PATH},max_tokens_in_paged_kv_cache:2560,max_attention_window_size:2560,kv_cache_free_gpu_mem_fraction:0.3,exclude_input_in_output:true,enable_kv_cache_reuse:false,batching_strategy:inflight_fused_batching,batch_scheduler_policy:guaranteed_completion,max_queue_delay_microseconds:5000
 
 ```
 

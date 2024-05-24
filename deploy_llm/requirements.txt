@@ -1,1 +1,4 @@
 tritonclient[all]
+fastapi
+pydantic
+shortuuid

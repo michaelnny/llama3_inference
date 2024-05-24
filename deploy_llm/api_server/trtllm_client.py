@@ -1,3 +1,12 @@
+"""
+
+Code adapted from NVIDIA's GenerativeAIExamples:
+
+GenerativeAIExamples/RetrievalAugmentedGeneration/llm-inference-server/model_server_client/trt_llm.py
+
+https://github.com/NVIDIA/GenerativeAIExamples
+"""
+
 import abc
 import json
 import queue
@@ -14,20 +23,24 @@ from tritonclient.grpc.service_pb2 import ModelInferResponse
 from tritonclient.utils import np_to_triton_dtype
 
 
-STOP_WORDS = ["</s>", "<|end_of_text|>", "<|eot_id|>"]
-RANDOM_SEED = 0
+DEFAULT_STOP_WORDS = ["</s>", "<|end_of_text|>", "<|eot_id|>"]
 
 class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     """A Generator that provides the inference results from an LLM."""
 
     def __init__(
-        self, client: "GrpcTritonClient", request_id: str, force_batch: bool
+        self,
+        client: "GrpcTritonClient",
+        request_id: str,
+        force_batch: bool = False,
+        stop_words: List[str] = ["</s>", "<|end_of_text|>", "<|eot_id|>"],
     ) -> None:
         """Instantiate the generator class."""
         super().__init__()
         self._client = client
         self.request_id = request_id
         self._batch = force_batch
+        self.stop_words = stop_words
 
     def __iter__(self) -> "StreamingResponseGenerator":
         """Return self as a generator."""
@@ -36,7 +49,7 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     def __next__(self) -> str:
         """Return the next retrieved token."""
         val = self.get()
-        if val is None or val in STOP_WORDS:
+        if val is None or val in self.stop_words:
             self._stop_stream()
             raise StopIteration()
         return val
@@ -48,14 +61,12 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
         )
 
 
-
-class _BaseTritonClient(abc.ABC):
+class BaseTritonClient(abc.ABC):
     """An abstraction of the connection to a triton inference server."""
 
-    def __init__(self, server_url: str) -> None:
+    def __init__(self, url: str, verbose: bool = False) -> None:
         """Initialize the client."""
-        self._server_url = server_url
-        self._client = self._inference_server_client(server_url)
+        self._client = self._inference_server_client(url=url, verbose=verbose)
 
     @property
     @abc.abstractmethod
@@ -82,7 +93,7 @@ class _BaseTritonClient(abc.ABC):
     ]:
         """Return the preferred InferRequestedOutput."""
 
-    def load_model(self, model_name: str, timeout: int = 1000) -> None:
+    def load_model(self, model_name: str, timeout: int = 3000) -> None:
         """Load a model into the server."""
         if self._client.is_model_ready(model_name):
             return
@@ -96,18 +107,21 @@ class _BaseTritonClient(abc.ABC):
         if not self._client.is_model_ready(model_name):
             raise RuntimeError(f"Failed to load {model_name} on Triton in {timeout}s")
 
-    def get_model_list(self) -> List[str]:
+    def get_model_list(self) -> List[dict]:
         """Get a list of models loaded in the triton server."""
         res = self._client.get_model_repository_index(as_json=True)
-        return [model["name"] for model in res["models"]]
+        models = res["models"] if "models" in res else []
+        return models
 
-    def get_model_concurrency(self, model_name: str, timeout: int = 1000) -> int:
-        """Get the modle concurrency."""
-        self.load_model(model_name, timeout)
-        instances = self._client.get_model_config(model_name, as_json=True)["config"][
-            "instance_group"
+    def get_model_config(self, model_name: str) -> dict:
+        """Get the model config."""
+        return self._client.get_model_config(model_name, as_json=True)["config"]
+
+    def get_model_statistics(self, model_name: str) -> dict:
+        """Get the model statistics."""
+        return self._client.get_inference_statistics(model_name, as_json=True)[
+            "model_stats"
         ]
-        return sum(instance["count"] * len(instance["gpus"]) for instance in instances)
 
     def _generate_stop_signals(
         self,
@@ -144,7 +158,8 @@ class _BaseTritonClient(abc.ABC):
     def _generate_inputs(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         prompt: str,
-        tokens: int = 300,
+        stop_words: List[str] = ["</s>", "<|end_of_text|>", "<|eot_id|>"],
+        max_tokens: int = 512,
         temperature: float = 1.0,
         top_k: float = 1,
         top_p: float = 0,
@@ -152,48 +167,61 @@ class _BaseTritonClient(abc.ABC):
         repetition_penalty: float = 1,
         length_penalty: float = 1.0,
         stream: bool = True,
+        random_seed: int = 1,
     ) -> List[Union[grpcclient.InferInput, httpclient.InferInput]]:
         """Create the input for the triton inference server."""
-        query = np.array(prompt).astype(object)
-        request_output_len = np.array([tokens]).astype(np.uint32).reshape((1, -1))
-        runtime_top_k = np.array([top_k]).astype(np.uint32).reshape((1, -1))
-        runtime_top_p = np.array([top_p]).astype(np.float32).reshape((1, -1))
-        temperature_array = np.array([temperature]).astype(np.float32).reshape((1, -1))
-        len_penalty = np.array([length_penalty]).astype(np.float32).reshape((1, -1))
-        repetition_penalty_array = (
+        input_query = np.array([prompt]).astype(object).reshape((1, -1))
+        input_stop_words = np.array([stop_words]).astype(object).reshape((1, -1))
+        input_max_tokens = np.array([max_tokens]).astype(np.int32).reshape((1, -1))
+        input_top_k = np.array([top_k]).astype(np.int32).reshape((1, -1))
+        input_top_p = np.array([top_p]).astype(np.float32).reshape((1, -1))
+        input_temperature = np.array([temperature]).astype(np.float32).reshape((1, -1))
+        input_len_penalty = (
+            np.array([length_penalty]).astype(np.float32).reshape((1, -1))
+        )
+        input_repeat_penalty = (
             np.array([repetition_penalty]).astype(np.float32).reshape((1, -1))
         )
-        random_seed = np.array([RANDOM_SEED]).astype(np.uint64).reshape((1, -1))
-        beam_width_array = np.array([beam_width]).astype(np.uint32).reshape((1, -1))
-        streaming_data = np.array([[stream]], dtype=bool)
+        input_random_seed = np.array([random_seed]).astype(np.uint64).reshape((1, -1))
+        input_beam_width = np.array([beam_width]).astype(np.int32).reshape((1, -1))
+        input_stream = np.array([stream], dtype=bool).reshape((1, -1))
+        input_stream = np.array([stream], dtype=bool).reshape((1, -1))
 
         inputs = [
-            self._prepare_tensor("text_input", query),
-            self._prepare_tensor("max_tokens", request_output_len),
-            self._prepare_tensor("top_k", runtime_top_k),
-            self._prepare_tensor("top_p", runtime_top_p),
-            self._prepare_tensor("temperature", temperature_array),
-            self._prepare_tensor("length_penalty", len_penalty),
-            self._prepare_tensor("repetition_penalty", repetition_penalty_array),
-            self._prepare_tensor("random_seed", random_seed),
-            self._prepare_tensor("beam_width", beam_width_array),
-            self._prepare_tensor("stream", streaming_data),
+            self._prepare_tensor("text_input", input_query),
+            self._prepare_tensor("stop_words", input_stop_words),
+            self._prepare_tensor("max_tokens", input_max_tokens),
+            self._prepare_tensor("top_k", input_top_k),
+            self._prepare_tensor("top_p", input_top_p),
+            self._prepare_tensor("temperature", input_temperature),
+            self._prepare_tensor("length_penalty", input_len_penalty),
+            self._prepare_tensor("repetition_penalty", input_repeat_penalty),
+            self._prepare_tensor("random_seed", input_random_seed),
+            self._prepare_tensor("beam_width", input_beam_width),
+            self._prepare_tensor("stream", input_stream),
         ]
         return inputs
 
-    def _trim_batch_response(self, result_str: str) -> str:
+    def _trim_batch_response(self, result_str: str, stop_words: List[str]) -> str:
         """Trim the resulting response from a batch request by removing provided prompt and extra generated text."""
         # extract the generated part of the prompt
-        split = result_str.split("[/INST]", 1)
-        generated = split[-1]
-        end_token = generated.find("</s>")
-        if end_token == -1:
-            return generated
-        generated = generated[:end_token].strip()
+
+        # for llama2
+        if "[/INST]" in result_str:
+            split = result_str.split("[/INST]", 1)
+            generated = split[-1]
+        else:
+            generated = result_str
+
+        end_token_idx = -1
+        for stop_word in stop_words:
+            end_token_idx = generated.find(stop_word)
+            if end_token_idx != -1:
+                return generated[:end_token_idx].strip()
         return generated
 
 
-class GrpcTritonClient(_BaseTritonClient):
+class GrpcTritonClient(BaseTritonClient):
     """GRPC connection to a triton inference server."""
 
     @property
@@ -229,12 +257,10 @@ class GrpcTritonClient(_BaseTritonClient):
     def _process_result(result: Dict[str, str]) -> str:
         """Post-process the result from the server."""
         message = ModelInferResponse()
-        generated_text: str = ""
         google.protobuf.json_format.Parse(json.dumps(result), message)
         infer_result = grpcclient.InferResult(message)
         np_res = infer_result.as_numpy("text_output")
-
-        generated_text = ""
+        generated_text: str = ""
         if np_res is not None:
             generated_text = "".join([token.decode() for token in np_res])
 
@@ -242,7 +268,7 @@ class GrpcTritonClient(_BaseTritonClient):
 
     def _stream_callback(
         self,
-        result_queue: queue.Queue[Union[Optional[Dict[str, str]], str]],
+        result_queue: StreamingResponseGenerator,
         force_batch: bool,
         result: Any,
         error: str,
@@ -256,9 +282,11 @@ class GrpcTritonClient(_BaseTritonClient):
                 # the very last response might have no output, just the final flag
                 response = self._process_result(response_raw)
                 if force_batch:
-                    response = self._trim_batch_response(response)
+                    response = self._trim_batch_response(
+                        response, result_queue.stop_words
+                    )
 
-                if response in STOP_WORDS:
+                if response in result_queue.stop_words:
                     result_queue.put(None)
                 else:
                     result_queue.put(response)
@@ -291,9 +319,18 @@ class GrpcTritonClient(_BaseTritonClient):
     def request_streaming(
         self,
         model_name: str,
+        prompt: str,
+        stop_words: Union[str, List[str]] = None,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+        top_k: float = 1,
+        top_p: float = 0,
+        beam_width: int = 1,
+        repetition_penalty: float = 1,
+        length_penalty: float = 1.0,
+        stream: bool = True,
+        random_seed: int = 1,
         request_id: Optional[str] = None,
-        force_batch: bool = False,
-        **params: Any,
     ) -> StreamingResponseGenerator:
         """Request a streaming connection."""
         if not self._client.is_model_ready(model_name):
@@ -302,8 +339,30 @@ class GrpcTritonClient(_BaseTritonClient):
         if not request_id:
             request_id = str(random.randint(1, 9999999))  # nosec
 
-        result_queue = StreamingResponseGenerator(self, request_id, force_batch)
-        inputs = self._generate_inputs(stream=not force_batch, **params)
+        if stop_words is None:
+            stop_words = DEFAULT_STOP_WORDS
+        elif isinstance(stop_words, str):
+            stop_words = [stop_words]
+
+        if max_tokens is None:
+            max_tokens = 1024
+
+        result_queue = StreamingResponseGenerator(
+            self, request_id, force_batch=not stream, stop_words=stop_words
+        )
+        inputs = self._generate_inputs(
+            prompt=prompt,
+            stop_words=stop_words,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            beam_width=beam_width,
+            repetition_penalty=repetition_penalty,
+            length_penalty=length_penalty,
+            stream=stream,
+            random_seed=random_seed,
+        )
         outputs = self._generate_outputs()
         self._send_prompt_streaming(
             model_name,
@@ -311,7 +370,7 @@ class GrpcTritonClient(_BaseTritonClient):
             outputs,
             request_id,
             result_queue,
-            force_batch,
+            force_batch=not stream,
         )
         return result_queue
 
@@ -322,50 +381,3 @@ class GrpcTritonClient(_BaseTritonClient):
         if signal:
             self._send_stop_signals(model_name, request_id)
         self._client.stop_stream()
-
-
-
-class HttpTritonClient(_BaseTritonClient):
-    """HTTP connection to a triton inference server."""
-
-    @property
-    def _inference_server_client(
-        self,
-    ) -> Type[httpclient.InferenceServerClient]:
-        """Return the prefered InferenceServerClient class."""
-        return httpclient.InferenceServerClient  # type: ignore
-
-    @property
-    def _infer_input(self) -> Type[httpclient.InferInput]:
-        """Return the preferred InferInput."""
-        return httpclient.InferInput  # type: ignore
-
-    @property
-    def _infer_output(
-        self,
-    ) -> Type[httpclient.InferRequestedOutput]:
-        """Return the preferred InferRequestedOutput."""
-        return httpclient.InferRequestedOutput  # type: ignore
-
-    def request(
-        self,
-        model_name: str,
-        **params: Any,
-    ) -> str:
-        """Request inferencing from the triton server."""
-        if not self._client.is_model_ready(model_name):
-            raise RuntimeError("Cannot request streaming, model is not loaded")
-
-        # create model inputs and outputs
-        inputs = self._generate_inputs(stream=False, **params)
-        outputs = self._generate_outputs()
-
-        # call the model for inference
-        result = self._client.infer(model_name, inputs=inputs, outputs=outputs)
-        result_str = "".join(
-            [val.decode("utf-8") for val in result.as_numpy("text_output").tolist()]
-        )
-
-        # extract the generated part of the prompt
-        # return(result_str)
-        return self._trim_batch_response(result_str)

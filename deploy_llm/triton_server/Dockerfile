@@ -14,8 +14,8 @@ RUN pip3 install protobuf tiktoken blobfile
 # Set the working directory
 WORKDIR /workspace
 
-# Copy the llama3 model engine and other TensorRT-LLM models
-COPY . /workspace
+# # Copy the llama3 model engine and other TensorRT-LLM models, we disabled it to save space
+# COPY . /workspace
 
 
 # Expose any necessary ports (if needed)
