@@ -1,16 +1,16 @@
 FROM python:3.10
 
-# Set environment variables for proxy (if needed), here I have proxy server running on my host machine on port 1081
-ENV https_proxy=http://172.17.0.1:1081
-ENV http_proxy=http://172.17.0.1:1081
+# # Set environment variables for proxy (if needed), here I have proxy server running on my host machine on port 1081
+# ENV https_proxy=http://172.17.0.1:1081
+# ENV http_proxy=http://172.17.0.1:1081
 
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-# Undo set environment variables for proxy
-ENV https_proxy=''
-ENV http_proxy=''
+# # Undo set environment variables for proxy
+# ENV https_proxy=''
+# ENV http_proxy=''
 
 
 # Set the working directory

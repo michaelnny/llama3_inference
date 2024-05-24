@@ -57,6 +57,9 @@ On your host machine, install streamlit and then launch the demo UI:
 pip3 install streamlit openai
 
 
+cd deploy_api_server
+
+
 streamlit run demo_ui.py
 
 ```
