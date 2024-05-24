@@ -72,3 +72,20 @@ The Triton server will utilize TensorRT-LLM-Backend to serve the engine, along w
 
 Please refer to `deploy_llm`, where you can follow the instructions inside `deploy_llm/README.md` on how to deploy the engine with Triton inference server.
 
+
+
+# 4. Test the deployment
+
+
+To test the deployment, we can use a very simple streamlit UI to check the connection and API compatibilities.
+
+
+On your host machine, install streamlit and then launch the demo UI:
+```bash
+
+pip3 install streamlit
+
+
+streamlit run demo_ui.py
+
+```

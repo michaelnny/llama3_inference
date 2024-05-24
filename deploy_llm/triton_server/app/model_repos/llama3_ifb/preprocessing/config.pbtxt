@@ -121,7 +121,7 @@ output [
 parameters {
   key: "tokenizer_dir"
   value: {
-    string_value: "/workspace/llama3_libs"
+    string_value: "/app/llama3_libs"
   }
 }
 

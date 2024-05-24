@@ -1,0 +1,4 @@
+numpy
+tiktoken
+protobuf
+blobfile

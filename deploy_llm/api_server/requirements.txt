@@ -1,4 +1,7 @@
 tritonclient[all]
 fastapi
 pydantic
+uvicorn
 shortuuid
+protobuf
+numpy

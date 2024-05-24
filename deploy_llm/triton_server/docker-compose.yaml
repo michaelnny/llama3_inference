@@ -17,13 +17,13 @@ services:
     network_mode: host
     shm_size: 2gb
     volumes:
-      - ${PWD}:/workspace # use '.:/workspace' if copy the workspace inside the Dockerfile
+      - ${PWD}/app:/app # use '.:/workspace' if copy the workspace inside the Dockerfile
     ports:
       - "8000:8000"
       - "8001:8001"
       - "8002:8002"
-    working_dir: /workspace
+    working_dir: /app
     ulimits:
       memlock: -1
       stack: 67108864
-    command: ["/usr/bin/python3", "start.py", "--model_repo", "/workspace/model_repos/llama3_ifb", "--world_size", "1"]
+    command: ["python3", "start.py", "--model_repo", "./model_repos/llama3_ifb", "--world_size", "1"]

@@ -48,10 +48,6 @@ FLAGS = None
 
 
 
-
-
-
-
 class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     """A Generator that provides the inference results from an LLM."""
 

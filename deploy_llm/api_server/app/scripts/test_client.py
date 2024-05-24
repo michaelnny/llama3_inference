@@ -38,7 +38,14 @@ import tritonclient.grpc as grpcclient
 from tritonclient.grpc.service_pb2 import ModelInferResponse
 from tritonclient.utils import InferenceServerException
 
-from trtllm_client import StreamingResponseGenerator, GrpcTritonClient
+
+# Simple hack to support running without installing as a package, so we can import the tokenizer
+from pathlib import Path
+import sys
+wd = Path(__file__).parent.parent.resolve()
+sys.path.append(str(wd))
+
+from utils.trtllm_client import StreamingResponseGenerator, GrpcTritonClient
 
 chat_template = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{0}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
 

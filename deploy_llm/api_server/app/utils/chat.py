@@ -1,6 +1,6 @@
 from typing import Literal, Optional, List, Dict, Any, Union
 
-from modeling import ChatMessage 
+from utils.modeling import ChatMessage 
 
 bos_token = "<|begin_of_text|>"
 start_header_token = "<|start_header_id|>"
@@ -22,3 +22,18 @@ def apply_chat_template(messages: List[ChatMessage]) -> str:
     # Add the start of an assistant message for the model to complete.
     result += f'{start_header_token}assistant{end_header_token}\n\n'
     return result
+
+
+TRITON_MODEL_NAME_MAP = {
+    'llama3': 'ensemble',
+}
+
+DEFAULT_MODEL_NAME = 'ensemble'
+
+
+def get_triton_server_model_name(model_name: str) -> str:
+    # Map model name to triton server model name
+    if model_name is None or model_name not in TRITON_MODEL_NAME_MAP:
+        return DEFAULT_MODEL_NAME
+    else:
+        return TRITON_MODEL_NAME_MAP[model_name]
