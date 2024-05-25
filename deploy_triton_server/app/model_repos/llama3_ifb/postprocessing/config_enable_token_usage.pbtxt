@@ -29,6 +29,12 @@ backend: "python"
 max_batch_size: 64
 input [
   {
+    name: "INPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+    allow_ragged_batch: true
+  },
+  {
     name: "TOKENS_BATCH"
     data_type: TYPE_INT32
     dims: [ -1, -1 ]
@@ -64,6 +70,16 @@ input [
   }
 ]
 output [
+  {
+    name: "INPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "OUTPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
   {
     name: "OUTPUT"
     data_type: TYPE_STRING

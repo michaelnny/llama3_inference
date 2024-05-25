@@ -442,37 +442,46 @@ curl localhost:8002/metrics
 
 ```
 
-
-
 ## Enable Token usage in Response
 
 If you want to enable token usage information like what the openAI API does, we need to make some changes to the model configurations and code.
 
 **Note**
-We can only add the `output_tokens`, since the input token information does not passing to the postprocessing ensemble pipeline.
+As of Triton server release `24.04` and `Triton Server Version 2.45.0`, we can only enable this if decouped mode is disabled. This means we can't use streaming feature.
 
-
-We need to create a new output field in the postprocessing model, and make small changes to the code to handle the information retrieval and output.
-
-The first step is to modify the `postprocessing\config.pbtxt`, add the following content:
-```bash
-
-output [
-  {
-    name: "OUTPUT_TOKEN_LEN"
-    data_type: TYPE_INT32
-    dims: [ -1 ]
-  },
-
-  ...
-
-]
+**Step 1** Add custom input and output fields to the `postprocessing` model.
 
 ```
+input [
+  {
+    name: "INPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+    allow_ragged_batch: true
+  }
 
-Then we need to chagne `postprocessing\1\model.py` to add logic to output the tensor corresponding to the above output field.
+  ...
+]
+output [
+  {
+    name: "INPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "OUTPUT_TOKENS_LEN"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
+
+  ...
+]
+```
+
+Then adjust the code inside `postprocessing\1\model.py`
 
 ```python
+
 
 class TritonPythonModel:
 
@@ -481,7 +490,7 @@ class TritonPythonModel:
         ...
 
         # Parse model output configs
-        output_names = ["OUTPUT", "OUTPUT_TOKEN_LEN"]
+        output_names = ["OUTPUT", "INPUT_TOKENS_LEN", "OUTPUT_TOKENS_LEN"]
         for output_name in output_names:
             setattr(
                 self,
@@ -490,48 +499,106 @@ class TritonPythonModel:
                     pb_utils.get_output_config_by_name(
                         model_config, output_name)['data_type']))
 
+
     def execute(self, requests):
 
-        ...
+        responses = []
 
-        # Number of tokens
-        output_token_len_tensor = pb_utils.Tensor(
-            'OUTPUT_TOKEN_LEN',
-            np.array(sequence_lengths).astype(self.output_token_len_dtype))
-        outputs.append(output_token_len_tensor)
+        # Every Python backend must iterate over everyone of the requests
+        # and create a pb_utils.InferenceResponse for each of them.
+        for idx, request in enumerate(requests):
+            # Get input tensors
+            input_tokens_lengths = pb_utils.get_input_tensor_by_name(
+                request, 'INPUT_TOKENS_LEN').as_numpy()
+
+            ...
+
+
+            # Count number of input and output tokens
+            input_tokens_len_tensor = pb_utils.Tensor(
+                'INPUT_TOKENS_LEN',
+                np.array(input_tokens_lengths).astype(self.input_tokens_len_dtype))
+            outputs.append(input_tokens_len_tensor)
+            output_tokens_len_tensor = pb_utils.Tensor(
+                'OUTPUT_TOKENS_LEN',
+                np.array(sequence_lengths).astype(self.output_tokens_len_dtype))
+            outputs.append(output_tokens_len_tensor)
 
 
 ```
 
+**Step 2** Change the `ensemble\config.pbtxt` file to add new output fields and map them in the pipeline
 
-Then, we can modify the `ensemble\config.pbtxt`, add the new output field to both `output` fields and the ensemble pipeline, as shown in the following content:
-```bash
-output[
+```
+
+output [
   {
-    name: "output_token_len"
+    name: "input_tokens_len"
     data_type: TYPE_INT32
-    dims: [ -1 ]
+    dims: [ 1 ]
   },
-
+  {
+    name: "output_tokens_len"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
   ...
-
 ]
-
 
 ensemble_scheduling {
   step [
-      {
+    ...
+
+    {
       model_name: "postprocessing"
       model_version: -1
-      
+      input_map {
+        key: "INPUT_TOKENS_LEN"
+        value: "_REQUEST_INPUT_LEN" # map from preprocessing model
+      }
+
       ...
 
-      output_map {
-        key: "OUTPUT_TOKEN_LEN"
-        value: "output_token_len"
+            output_map {
+        key: "INPUT_TOKENS_LEN"
+        value: "input_tokens_len"
       }
+      output_map {
+        key: "OUTPUT_TOKENS_LEN"
+        value: "output_tokens_len"
+      }
+    }
   ]
 }
+
+```
+
+Now we need to disable the decouped mode in side the `tensorrt_llm/config.pbtxt` file
+
+```
+model_transaction_policy {
+  decoupled: false
+}
+```
+
+
+
+If we send a request to the ensemble model, we should be able to get the input and output token length fields.
+
+```bash
+
+curl -H "Content-Type: application/json" \
+    -X POST localhost:8000/v2/models/ensemble/generate -d \
+    '{
+        "text_input": "Tell me a short joke about a dog and a cat.",        "parameters": {
+        "max_tokens": 256,
+        "stop_words":["<|eot_id|>"]
+        }              
+    }'
+
+
+# output
+{"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"input_tokens_len":12,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0, ..., 0.0,0.0,0.0],"output_tokens_len":69,"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" I'll try to come up with a joke on the spot.\n\nHere's a joke: Why did the dog and cat go to the vet?\n\nBecause they were feeling a little paws-itive!\n\nNow it's your turn! Can you come up with a joke about a dog and a cat? Go ahead and give it a try!<|eot_id|>"}
 
 
 ```

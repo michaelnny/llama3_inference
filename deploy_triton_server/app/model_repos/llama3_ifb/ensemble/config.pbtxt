@@ -178,11 +178,6 @@ output [
     dims: [ -1 ]
   },
   {
-    name: "output_token_len"
-    data_type: TYPE_INT32
-    dims: [ -1 ]
-  },
-  {
     name: "cum_log_probs"
     data_type: TYPE_FP32
     dims: [ -1 ]
@@ -427,10 +422,6 @@ ensemble_scheduling {
       output_map {
         key: "OUTPUT"
         value: "text_output"
-      }
-      output_map {
-        key: "OUTPUT_TOKEN_LEN"
-        value: "output_token_len"
       }
       output_map {
         key: "OUT_OUTPUT_LOG_PROBS"

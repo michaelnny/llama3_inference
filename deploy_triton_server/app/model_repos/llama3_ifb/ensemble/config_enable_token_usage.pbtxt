@@ -173,6 +173,16 @@ input [
 ]
 output [
   {
+    name: "input_tokens_len"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
+    name: "output_tokens_len"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  },
+  {
     name: "text_output"
     data_type: TYPE_STRING
     dims: [ -1 ]
@@ -396,6 +406,10 @@ ensemble_scheduling {
       model_name: "postprocessing"
       model_version: -1
       input_map {
+        key: "INPUT_TOKENS_LEN"
+        value: "_REQUEST_INPUT_LEN"
+      }
+      input_map {
         key: "TOKENS_BATCH"
         value: "_TOKENS_BATCH"
       }
@@ -418,6 +432,14 @@ ensemble_scheduling {
       input_map {
         key: "SEQUENCE_LENGTH"
         value: "_SEQUENCE_LENGTH"
+      }
+      output_map {
+        key: "INPUT_TOKENS_LEN"
+        value: "input_tokens_len"
+      }
+      output_map {
+        key: "OUTPUT_TOKENS_LEN"
+        value: "output_tokens_len"
       }
       output_map {
         key: "OUTPUT"

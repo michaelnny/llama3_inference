@@ -34,19 +34,19 @@ Now lets copy some custom testing scripts to the examples folder inside the Tens
 cd TensorRT-LLM
 
 # Copy our custom testing code to the TensorRT-LLM workspace
-cp -r ~/dl_projects/llama3_inference/build_llm/src/tokenizer.py ./examples
-cp -r ~/dl_projects/llama3_inference/build_llm/src/run_llama3.py ./examples
-cp -r ~/dl_projects/llama3_inference/build_llm/src/dolly-15k.jsonl ./examples
+cp -r ~/dl_projects/llama3_inference/build_trtllm_engine/src/tokenizer.py ./examples
+cp -r ~/dl_projects/llama3_inference/build_trtllm_engine/src/run_llama3.py ./examples
+cp -r ~/dl_projects/llama3_inference/build_trtllm_engine/src/dolly-15k.jsonl ./examples
 
 
 # Notice as of May 2024, the v0.9.0 has multiple bug of using fixed vocab size inside the model class
-cp -r ~/dl_projects/llama3_inference/build_llm/src/trtllm_v0.9.0_llama_model.py ./tensorrt_llm/models/llama/model.py
+cp -r ~/dl_projects/llama3_inference/build_trtllm_engine/src/trtllm_v0.9.0_llama_model.py ./tensorrt_llm/models/llama/model.py
 
 ```
 
 ## Build the Docker container for TensorRT-LLM
 
-We start by pulling the NVIDIA CUDA docker image, the process are maintained inside the `build_llm/Dockerfile`. On your host machine, navigate to `build_llm` folder, and run the following command to build the TensorRT-LLM container and save it to a image called `tensorrtllm-image:v0.9.0`.
+We start by pulling the NVIDIA CUDA docker image, the process are maintained inside the `build_trtllm_engine/Dockerfile`. On your host machine, navigate to `build_trtllm_engine` folder, and run the following command to build the TensorRT-LLM container and save it to a image called `tensorrtllm-image:v0.9.0`.
 
 ```bash
 

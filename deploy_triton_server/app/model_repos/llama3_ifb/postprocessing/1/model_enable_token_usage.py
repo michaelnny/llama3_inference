@@ -68,7 +68,7 @@ class TritonPythonModel:
         self.tokenizer: Tokenizer = Tokenizer(tokenizer_path)
 
         # Parse model output configs
-        output_names = ["OUTPUT"]
+        output_names = ["OUTPUT", "INPUT_TOKENS_LEN", "OUTPUT_TOKENS_LEN"]
         for output_name in output_names:
             setattr(
                 self,
@@ -103,6 +103,9 @@ class TritonPythonModel:
         # and create a pb_utils.InferenceResponse for each of them.
         for idx, request in enumerate(requests):
             # Get input tensors
+            input_tokens_lengths = pb_utils.get_input_tensor_by_name(
+                request, 'INPUT_TOKENS_LEN').as_numpy()
+            
             output_tokens_batch = pb_utils.get_input_tensor_by_name(
                 request, 'TOKENS_BATCH').as_numpy()
 
@@ -137,6 +140,17 @@ class TritonPythonModel:
                 'OUTPUT',
                 np.array(output_texts).astype(self.output_dtype))
             outputs.append(output_tensor)
+
+            # Token counts
+            input_tokens_len_tensor = pb_utils.Tensor(
+                'INPUT_TOKENS_LEN',
+                np.array(input_tokens_lengths).astype(self.input_tokens_len_dtype))
+            outputs.append(input_tokens_len_tensor)
+            output_tokens_len_tensor = pb_utils.Tensor(
+                'OUTPUT_TOKENS_LEN',
+                np.array(sequence_lengths).astype(self.output_tokens_len_dtype))
+            outputs.append(output_tokens_len_tensor)
+
 
             if cum_log_probs:
                 out_cum_log_probs = pb_utils.Tensor('OUT_CUM_LOG_PROBS',
