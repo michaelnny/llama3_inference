@@ -1,15 +1,13 @@
 """Common pydantic data models for the API request/responses"""
 
 from typing import Literal, Optional, List, Dict, Any, Union
-
 import time
-
+import bleach
 import shortuuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 
 generate_random_id = lambda: shortuuid.random()
-
 
 
 class ErrorResponse(BaseModel):
@@ -31,6 +29,20 @@ class ChatMessage(BaseModel):
     role: Role
     content: str
 
+    @validator("role")
+    def validate_role(cls, value):
+        """Field validator function to validate values of the field role"""
+        value = bleach.clean(value, strip=True)
+        valid_roles = {"user", "assistant", "system"}
+        if value.lower() not in valid_roles:
+            raise ValueError("Role must be one of 'user', 'assistant', or 'system'")
+        return value.lower()
+
+    @validator("content")
+    def sanitize_content(cls, v):
+        """Field validator function to santize user populated fields from HTML"""
+        return bleach.clean(v, strip=True)
+
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -43,7 +55,26 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     repetition_penalty: Optional[float] = 1
     length_penalty: Optional[float] = 1.0
-    random_seed: Optional[int] = 1
+    seed: Optional[int] = 1
+
+    @validator("messages")
+    def validate_messages(cls, v):
+        """Field validator function to check valid message turns"""
+        if v is None or len(v) == 0:
+            raise ValueError("Chat messages can not be none or empty")
+        else:
+            if v[0].role == "system":
+                start_idx = 1
+            else:
+                start_idx = 0
+            if not all([msg.role == "user" for msg in v[start_idx::2]]) or not all(
+                [msg.role == "assistant" for msg in v[start_idx + 1 :: 2]]
+            ):
+                raise ValueError(
+                    'Chat messages should start with either "system" or "user", then followed by "assistant", and alternating (user/assistant/...)'
+                )
+            else:
+                return v
 
 
 class ChatCompletionResponseChoice(BaseModel):
@@ -65,6 +96,7 @@ class ChatCompletionResponse(BaseModel):
 class DeltaMessage(BaseModel):
     role: Optional[str] = None
     content: Optional[str] = None
+
 
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int

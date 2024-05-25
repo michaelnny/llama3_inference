@@ -9,22 +9,11 @@ end_header_token = "<|end_header_id|>"
 eot_token = "<|eot_id|>"  # end of turn
 
 
-def check_valid_chat_pattern(messages: List[ChatMessage]) -> None:
-    if messages is None:
-        raise ValueError("Chat messages can not be none")
-    elif len(messages) == 0:
-        raise ValueError("Chat messages can not be empty")
-    else:
-        if messages[0].role == "system":
-            start_idx = 1
-        else:
-            start_idx = 0
-        if not all([msg.role == "user" for msg in messages[start_idx::2]]) or not all(
-            [msg.role == "assistant" for msg in messages[start_idx + 1 :: 2]]
-        ):
-            raise ValueError(
-                'Chat messages should start with either "system" or "user", then followed by "assistant", and alternating (user/assistant/...)'
-            )
+TRITON_MODEL_NAME_MAP = {
+    "llama3": "ensemble",
+}
+
+DEFAULT_MODEL_NAME = "ensemble"
 
 
 def format_single_turn(message: ChatMessage) -> str:
@@ -44,13 +33,6 @@ def apply_chat_template(messages: List[ChatMessage]) -> str:
     return result
 
 
-TRITON_MODEL_NAME_MAP = {
-    "llama3": "ensemble",
-}
-
-DEFAULT_MODEL_NAME = "ensemble"
-
-
 def get_triton_server_model_name(model_name: str) -> str:
     # Map model name to triton server model name
     if model_name is None or model_name not in TRITON_MODEL_NAME_MAP:
@@ -65,23 +47,28 @@ def count_number_of_tokens(tokenizer: Tokenizer, text: str) -> int:
 
 
 def maybe_prune_chat_history(
-    tokenizer: Tokenizer, messages: List[ChatMessage], max_len: int = 512, verbose: bool = False
+    tokenizer: Tokenizer,
+    messages: List[ChatMessage],
+    max_len: int = 512,
+    verbose: bool = False,
 ) -> None:
     """Try to prune chat history to make sure it not exceeds the context limit."""
 
     if not messages:
         return  # No messages to prune
-    
+    elif len(messages) <= 2:
+        return  # too short
+
     max_len = max(max_len, 512)
 
     if verbose:
-        print(f'Max length: {max_len}')
+        print(f"Max length: {max_len}")
 
     # Count the number of tokens for each turn, start from the last turn
     total_tokens = 0
     cut_idx = -1
     half_cut = False
-    for i in reversed(range(len(messages))): 
+    for i in reversed(range(len(messages))):
         message = messages[i]
         formatted_input = format_single_turn(message)
         n = count_number_of_tokens(tokenizer, formatted_input)
@@ -92,25 +79,26 @@ def maybe_prune_chat_history(
             if n > max_len * 0.7:
                 half_cut = True
             break
-    
+
     if cut_idx >= 0:
         if verbose:
-            print(f'Before cut:\n{messages}')
-            
+            print(f"Before cut:\n{messages}")
+
         has_system_msg = messages[0].role == "system"
-        for i in range(cut_idx+1):
+        for i in range(cut_idx + 1):
             if has_system_msg:
                 pop_idx = 1
             else:
                 pop_idx = 0
-            
+
             if half_cut and i == cut_idx:
-                # Try to cut the content in a single turn to 
-                sentences = messages[pop_idx].content.split(' ')
-                messages[pop_idx].content = ' '.join(sentences[-(len(sentences)//2):])
+                # Try to cut the content in a single turn to
+                sentences = messages[pop_idx].content.split(" ")
+                messages[pop_idx].content = " ".join(
+                    sentences[-(len(sentences) // 2) :]
+                )
             else:
                 messages.pop(pop_idx)
-        
+
         if verbose:
-            print(f'After cut:\n{messages}')
-        
+            print(f"After cut:\n{messages}")
