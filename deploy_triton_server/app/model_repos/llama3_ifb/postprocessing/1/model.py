@@ -68,13 +68,15 @@ class TritonPythonModel:
         self.tokenizer: Tokenizer = Tokenizer(tokenizer_path)
 
         # Parse model output configs
-        output_config = pb_utils.get_output_config_by_name(
-            model_config, "OUTPUT")
-
-        # Convert Triton types to numpy types
-        self.output_dtype = pb_utils.triton_string_to_numpy(
-            output_config['data_type'])
-
+        output_names = ["OUTPUT", "OUTPUT_TOKEN_LEN"]
+        for output_name in output_names:
+            setattr(
+                self,
+                output_name.lower() + "_dtype",
+                pb_utils.triton_string_to_numpy(
+                    pb_utils.get_output_config_by_name(
+                        model_config, output_name)['data_type']))
+            
     def execute(self, requests):
         """`execute` must be implemented in every Python model. `execute`
         function receives a list of pb_utils.InferenceRequest as the only
@@ -129,16 +131,23 @@ class TritonPythonModel:
             # tokens_batch = tokens_batch.T
 
             # Postprocessing output data.
-            outputs = self._postprocessing(tokens_batch, sequence_lengths)
+            output_texts = self._postprocessing(tokens_batch, sequence_lengths)
+
+            outputs = []
 
             # Create output tensors. You need pb_utils.Tensor
             # objects to create pb_utils.InferenceResponse.
             output_tensor = pb_utils.Tensor(
                 'OUTPUT',
-                np.array(outputs).astype(self.output_dtype))
-
-            outputs = []
+                np.array(output_texts).astype(self.output_dtype))
             outputs.append(output_tensor)
+
+            # Number of tokens
+            output_token_len_tensor = pb_utils.Tensor(
+                'OUTPUT_TOKEN_LEN',
+                np.array(sequence_lengths).astype(self.output_token_len_dtype))
+            outputs.append(output_token_len_tensor)
+
 
             if cum_log_probs:
                 out_cum_log_probs = pb_utils.Tensor('OUT_CUM_LOG_PROBS',

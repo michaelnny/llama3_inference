@@ -441,3 +441,97 @@ We can monitor the status by open a new terminal on the host machine and run the
 curl localhost:8002/metrics
 
 ```
+
+
+
+## Enable Token usage in Response
+
+If you want to enable token usage information like what the openAI API does, we need to make some changes to the model configurations and code.
+
+**Note**
+We can only add the `output_tokens`, since the input token information does not passing to the postprocessing ensemble pipeline.
+
+
+We need to create a new output field in the postprocessing model, and make small changes to the code to handle the information retrieval and output.
+
+The first step is to modify the `postprocessing\config.pbtxt`, add the following content:
+```bash
+
+output [
+  {
+    name: "OUTPUT_TOKEN_LEN"
+    data_type: TYPE_INT32
+    dims: [ -1 ]
+  },
+
+  ...
+
+]
+
+```
+
+Then we need to chagne `postprocessing\1\model.py` to add logic to output the tensor corresponding to the above output field.
+
+```python
+
+class TritonPythonModel:
+
+    def initialize(self, args):
+
+        ...
+
+        # Parse model output configs
+        output_names = ["OUTPUT", "OUTPUT_TOKEN_LEN"]
+        for output_name in output_names:
+            setattr(
+                self,
+                output_name.lower() + "_dtype",
+                pb_utils.triton_string_to_numpy(
+                    pb_utils.get_output_config_by_name(
+                        model_config, output_name)['data_type']))
+
+    def execute(self, requests):
+
+        ...
+
+        # Number of tokens
+        output_token_len_tensor = pb_utils.Tensor(
+            'OUTPUT_TOKEN_LEN',
+            np.array(sequence_lengths).astype(self.output_token_len_dtype))
+        outputs.append(output_token_len_tensor)
+
+
+```
+
+
+Then, we can modify the `ensemble\config.pbtxt`, add the new output field to both `output` fields and the ensemble pipeline, as shown in the following content:
+```bash
+output[
+  {
+    name: "output_token_len"
+    data_type: TYPE_INT32
+    dims: [ -1 ]
+  },
+
+  ...
+
+]
+
+
+ensemble_scheduling {
+  step [
+      {
+      model_name: "postprocessing"
+      model_version: -1
+      
+      ...
+
+      output_map {
+        key: "OUTPUT_TOKEN_LEN"
+        value: "output_token_len"
+      }
+  ]
+}
+
+
+```

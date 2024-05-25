@@ -20,6 +20,23 @@ tokenizer: Tokenizer = None
 max_input_len: int = 512
 
 
+async def stream_results(model_name: str, result_queue: StreamingResponseGenerator) -> AsyncGenerator[bytes, None]:
+    try:
+        for token in result_queue:
+            if token == None:
+                break
+            
+            delta_choices = [ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant", content=token))]
+            stream_response = ChatCompletionStreamResponse(model=model_name, choices=delta_choices)
+            # yield json.dumps(stream_response.json()).encode("utf-8")
+
+            # The "data:" + <content> + "\n\n" format is important, as frontend SSE libraries will specifically look for this JSON pattern.
+            json_bytes = stream_response.json().encode("utf-8")
+            yield b"data: " + json_bytes + b"\n\n"
+    except Exception as error:
+        error_response = ErrorResponse(message=f"Streaming error: {str(error)}", code=500)
+        json_bytes = error_response.json().encode("utf-8")
+        yield b"data: " + json_bytes + b"\n\n"
 
 
 @app.post("/v1/chat/completions")
@@ -39,7 +56,7 @@ async def generate(request: ChatCompletionRequest) -> Union[ChatCompletionRespon
         check_valid_chat_pattern(request.messages)
     except ValueError as error:
         print(error)
-        return ErrorResponse(object='error', message=f'Chat messages error: {error}', code=400)
+        return ErrorResponse(object='error', message=f'Chat messages error: {str(error)}', code=400)
     finally:
         maybe_prune_chat_history(tokenizer, request.messages, max_input_len)
         prompt = apply_chat_template(request.messages)
@@ -60,36 +77,23 @@ async def generate(request: ChatCompletionRequest) -> Union[ChatCompletionRespon
         )
 
         if request.stream:
-            async def stream_results() -> AsyncGenerator[bytes, None]:
-                for token in result_queue:
-                    if token == None:
-                        break
-                        
-                    delta_choices = [ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant", content=token))]
-                    stream_response = ChatCompletionStreamResponse(model=request.model, choices=delta_choices)
-                    # yield json.dumps(stream_response.json()).encode("utf-8")
-
-                    # The "data:" + <content> + "\n\n" format is important, as frontend SSE libraries will specifically look for this JSON pattern.
-                    json_bytes = stream_response.json().encode("utf-8")
-                    yield b"data: " + json_bytes + b"\n\n"
-
-            return StreamingResponse(stream_results(), media_type='text/event-stream')
+            return StreamingResponse(stream_results(request.model, result_queue), media_type='text/event-stream')
 
         # If not streaming, return the generated content directly
         generated_content = []
-        for token in result_queue:
-            if token is None:
+        for response in result_queue:
+            if response is None:
                 break
-            generated_content.append(token)
+            generated_content.append(response)
 
         choices = [ChatCompletionResponseChoice(index=i, message=ChatMessage(role="assistant", content=content) ) for i, content in enumerate(generated_content)]
         return ChatCompletionResponse(model=request.model, choices=choices)
     except InferenceServerException as error:
         print(error)
-        return ErrorResponse(object='error', message=f'Error when try to make inference call: {error}', code=500)
+        return ErrorResponse(object='error', message=f'Error when try to make inference call: {str(error)}', code=500)
     except Exception as error:
         print(error)
-        return ErrorResponse(object='error', message=f'Unknown error: {error}', code=400)
+        return ErrorResponse(object='error', message=f'Unknown error: {str(error)}', code=400)
 
 
 @app.on_event("startup")

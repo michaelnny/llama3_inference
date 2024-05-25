@@ -260,6 +260,8 @@ class GrpcTritonClient(BaseTritonClient):
         google.protobuf.json_format.Parse(json.dumps(result), message)
         infer_result = grpcclient.InferResult(message)
         np_res = infer_result.as_numpy("text_output")
+        # items = infer_result.as_numpy("input_token_len")
+        # print(items)
         generated_text: str = ""
         if np_res is not None:
             generated_text = "".join([token.decode() for token in np_res])
