@@ -1,0 +1,28 @@
+name: "st_preprocessing"
+max_batch_size: 128
+input {
+  name: "QUERY"
+  data_type: TYPE_STRING
+  dims: [-1]
+}
+output {
+  name: "INPUT_ID"
+  data_type: TYPE_INT64
+  dims: [-1]
+}
+output {
+  name: "ATTENTION_MASK"
+  data_type: TYPE_INT64
+  dims: [-1]
+}
+instance_group {
+  count: 1
+  kind: KIND_CPU
+}
+parameters {
+  key: "tokenizer_dir"
+  value {
+    string_value: "/app/local_tokenizers/bert"
+  }
+}
+backend: "python"

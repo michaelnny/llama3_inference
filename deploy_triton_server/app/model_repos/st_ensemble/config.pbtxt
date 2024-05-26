@@ -1,0 +1,50 @@
+
+name: "st_ensemble"
+platform: "ensemble"
+max_batch_size: 128
+input {
+  name: "input"
+  data_type: TYPE_STRING
+  dims: [-1]
+}
+output {
+  name: "embedding"
+  data_type: TYPE_FP32
+  dims: [384]
+}
+ensemble_scheduling {
+  step [
+    {
+      model_name: "st_preprocessing"
+      model_version: -1
+      input_map {
+        key: "QUERY"
+        value: "input"
+      }
+      output_map {
+        key: "INPUT_ID"
+        value: "_INPUT_ID"
+      }
+      output_map {
+        key: "ATTENTION_MASK"
+        value: "_ATTENTION_MASK"
+      }
+    },
+    {
+      model_name: "st_embedding"
+      model_version: -1
+      input_map {
+        key: "input_ids"
+        value: "_INPUT_ID"
+      }
+      input_map {
+        key: "attention_mask"
+        value: "_ATTENTION_MASK"
+      }
+      output_map {
+        key: "output"
+        value: "embedding"
+      }
+    }
+  ]
+}

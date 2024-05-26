@@ -1,4 +1,4 @@
-# Deploy a TensorRT-LLM model engine to Triton inference server
+# 1. Deploy a TensorRT-LLM model engine to Triton inference server
 
 **Prerequisites**
 
@@ -9,13 +9,13 @@ You need to make sure your host machine has Docker runtime and NVIDIA Container 
 
 You need to have a working TensorRT-LLM model engine.
 
-## Prepare TensorRT-LLM-Backend for Triton Inference Server
+## 1.1 Prepare TensorRT-LLM-Backend for Triton Inference Server
 
 On the host machine, clone the TensorRT-LLM backend repository to a temporary location, make sure we're on the same release as the one we use to build TensorRT-LLM engine.
 
 ```bash
 
-cd ~/dl_projects
+cd /tmp
 
 git clone -b v0.9.0 https://github.com/triton-inference-server/tensorrtllm_backend.git
 
@@ -29,41 +29,50 @@ On your host machine, navigate to `deploy_llm` folder.
 
 cd deploy_triton_server/app
 
-# Llama3 inflight batching model repository
-mkdir -p model_repos/llama3_ifb
-
-# Store tiktoken tokenizer class and checkpoint
-mkdir -p llama3_libs
+# model repository and local tokenizers
+mkdir model_repos
+mkdir -p local_tokenizers/llama3
 
 
-# Copy example model folder from tensorrtllm_backend to our repository
-cp -r ~/dl_projects/tensorrtllm_backend/all_models/inflight_batcher_llm/* model_repos/llama3_ifb/
+# Copy example model folder from tensorrtllm_backend to our workspace
+cp -r /tmp/tensorrtllm_backend/all_models/inflight_batcher_llm/* model_repos/
+
+
+# Remove BLS model folder since we don't use it
+rm -rf model_repos/tensorrt_llm_bls
+
+
+# Change file names to avoid confusion
+mv model_repos/ensemble model_repos/llama3_ensemble
+mv model_repos/preprocessing model_repos/llama3_preprocessing
+mv model_repos/postprocessing model_repos/llama3_postprocessing
+mv model_repos/tensorrt_llm model_repos/llama3_tensorrt_llm
 
 
 # Remove any existing file for `tensorrt_llm` model
-rm model_repos/llama3_ifb/tensorrt_llm/1/*
+rm model_repos/llama3_tensorrt_llm/1/*
 
 
 # Copy the TensorRT-LLM engine to the model repository
-cp ../../build_llm/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16/* model_repos/llama3_ifb/tensorrt_llm/1/
+cp ../../build_models/tmp/trt_engines/Llama-3-8B-Instruct-1gpu-bf16/* model_repos/llama3_tensorrt_llm/1/
 
 
 # Copy the preprocessing and postprocessing model.py files to the model repository, these include modified code to use the native tiktoken
-cp ./src/trt_preprocessing_model.py model_repos/llama3_ifb/preprocessing/1/model.py
-cp ./src/trt_postprocessing_model.py model_repos/llama3_ifb/postprocessing/1/model.py
+cp ./src/trt_preprocessing_model.py model_repos/llama3_preprocessing/1/model.py
+cp ./src/trt_postprocessing_model.py model_repos/llama3_postprocessing/1/model.py
 
 
 # Finally copy the tiktoken class and checkpoint file to the triton server
-cp ./src/tokenizer.py llama3_libs
-cp ~/models/Llama3/Meta-Llama-3-8B-Instruct/tokenizer.model llama3_libs
+cp ./src/tokenizer.py local_tokenizers/llama3/
+cp ./src/tokenizer.model local_tokenizers/llama3/
 
 
 # Copy start Triton server script
-cp ~/dl_projects/tensorrtllm_backend/scripts/launch_triton_server.py ./start.py
+cp ./src/launch_triton_server.py ./start.py
 
 ```
 
-Now we need to update the `config.pbtxt` files for the different models in the `model_repos/llama3_ifb` folder. Specifically, we need to set the location of the tokenizer checkpoint, and location of the TensorRT-LLM model engine, amount other things like maximum batch size etc.
+Now we need to update the `config.pbtxt` files for the different models in the `model_repos` folder. Specifically, we need to set the location of the tokenizer checkpoint, and location of the TensorRT-LLM model engine, amount other things like maximum batch size etc.
 
 On the host machine, use the following command to update these properties. Note the script `src/fill_template.py` was copied from the `tensorrtllm_backend` project, which was located at `tensorrtllm_backend/tools/fill_template.py`.
 
@@ -71,73 +80,60 @@ On the host machine, use the following command to update these properties. Note 
 
 # Note here the /app is the path inside the Docker container
 # The location of the tiktoken tokenizer
-LLAMA_CKPT_DIR=/app/llama3_libs
+LLAMA_CKPT_DIR=/app/local_tokenizers/llama3
 
 # The location of the compiled TensorRT engine
-ENGINE_PATH=/app/model_repos/llama3_ifb/tensorrt_llm/1
+TRTLLM_ENGINE_PATH=/app/model_repos/llama3_tensorrt_llm/1
 
 
 cd deploy_triton_server
 
 
 # Update preprocessing model config
-python3 src/fill_template.py -i app/model_repos/llama3_ifb/preprocessing/config.pbtxt \
+python3 src/fill_template.py -i app/model_repos/llama3_preprocessing/config.pbtxt \
         tokenizer_dir:${LLAMA_CKPT_DIR},tokenizer_type:auto,triton_max_batch_size:64,preprocessing_instance_count:1
 
 
 # Update postprocessing model config
-python3 src/fill_template.py -i app/model_repos/llama3_ifb/postprocessing/config.pbtxt \
+python3 src/fill_template.py -i app/model_repos/llama3_postprocessing/config.pbtxt \
         tokenizer_dir:${LLAMA_CKPT_DIR},tokenizer_type:auto,triton_max_batch_size:64,postprocessing_instance_count:1
 
 
-# Update BLS model config
-python3 src/fill_template.py -i app/model_repos/llama3_ifb/tensorrt_llm_bls/config.pbtxt \
-        triton_max_batch_size:64,decoupled_mode:true,bls_instance_count:1,accumulate_tokens:false
-
-
 # Update ensemble model config
-python3 src/fill_template.py -i app/model_repos/llama3_ifb/ensemble/config.pbtxt triton_max_batch_size:64
+python3 src/fill_template.py -i app/model_repos/llama3_ensemble/config.pbtxt triton_max_batch_size:64
 
 
 # Update TensorRT-LLM model config
-python3 src/fill_template.py -i app/model_repos/llama3_ifb/tensorrt_llm/config.pbtxt \
-        triton_backend:tensorrtllm,triton_max_batch_size:64,decoupled_mode:true,max_beam_width:1,engine_dir:${ENGINE_PATH},max_tokens_in_paged_kv_cache:2560,max_attention_window_size:2560,kv_cache_free_gpu_mem_fraction:0.3,exclude_input_in_output:true,enable_kv_cache_reuse:false,batching_strategy:inflight_fused_batching,batch_scheduler_policy:guaranteed_completion,max_queue_delay_microseconds:5000
+python3 src/fill_template.py -i app/model_repos/llama3_tensorrt_llm/config.pbtxt \
+        triton_backend:tensorrtllm,triton_max_batch_size:64,decoupled_mode:true,max_beam_width:1,engine_dir:${TRTLLM_ENGINE_PATH},max_tokens_in_paged_kv_cache:2560,max_attention_window_size:2560,kv_cache_free_gpu_mem_fraction:0.3,exclude_input_in_output:true,enable_kv_cache_reuse:false,batching_strategy:inflight_fused_batching,batch_scheduler_policy:guaranteed_completion,max_queue_delay_microseconds:50000
 
 ```
 
-## Launch Triton inference server container
+## 1.2 Launch Triton inference server container
 
-Now, we can try to pull the Triton docker image and launch our inference server
+Now, we can try to pull the Triton docker image and launch our inference server.
+
+Notice since we're not using the standard name for the tensorrt-llm, we have to pass the additional parameter `"--tensorrt_llm_model_name", "llama3_tensorrt_llm"` inside the `Dockerfile` and `docker-compose.yaml` file.
 
 ```bash
 
 cd deploy_triton_server
 
 # Build the Docker image with the custom name
-docker-compose build
-
-# Disable cache when force rebuild
-docker-compose build --no-cache
+docker-compose up
 
 ```
 
-Now try to exist the Triton docker container and relaunch:
+Tips for troubleshooting:
 
 ```bash
 
-cd deploy_triton_server
-
-
-docker-compose up
-
-
-# Or run in detached mode
-docker-compose up -d
+# In case there are some error, isable cache when force rebuild
+docker-compose build --no-cache
 
 
 # Incase want to open interactive command, here 'triton-server' is the service name inside the 'docker-compose.yaml' file
 docker-compose run --rm triton-server
-
 ```
 
 Once the container is up and running, it will automatically launch the Triton inference server, and you should be able to see the output look like this.
@@ -154,32 +150,14 @@ ba5a4a84f245   triton-server-image:v24.04   "/opt/nvidia/nvidia_…"   16 minute
 docker logs ba5a4a84f245
 
 
-I0522 14:51:21.484246 381 server.cc:634]
-+-------------+----------------------------------------------+----------------------------------------------+
-| Backend     | Path                                         | Config                                       |
-+-------------+----------------------------------------------+----------------------------------------------+
-| python      | /opt/tritonserver/backends/python/libtriton_ | {"cmdline":{"auto-complete-config":"false"," |
-|             | python.so                                    | backend-directory":"/opt/tritonserver/backen |
-|             |                                              | ds","min-compute-capability":"6.000000","shm |
-|             |                                              | -region-prefix-name":"prefix0_","default-max |
-|             |                                              | -batch-size":"4"}}                           |
-|             |                                              |                                              |
-| tensorrtllm | /opt/tritonserver/backends/tensorrtllm/libtr | {"cmdline":{"auto-complete-config":"false"," |
-|             | iton_tensorrtllm.so                          | backend-directory":"/opt/tritonserver/backen |
-|             |                                              | ds","min-compute-capability":"6.000000","def |
-|             |                                              | ault-max-batch-size":"4"}}                   |
-|             |                                              |                                              |
-+-------------+----------------------------------------------+----------------------------------------------+
-
 I0522 14:51:21.485254 381 server.cc:677]
 +------------------+---------+--------+
 | Model            | Version | Status |
 +------------------+---------+--------+
-| ensemble         | 1       | READY  |
-| postprocessing   | 1       | READY  |
-| preprocessing    | 1       | READY  |
-| tensorrt_llm     | 1       | READY  |
-| tensorrt_llm_bls | 1       | READY  |
+| llama3_ensemble         | 1       | READY  |
+| llama3_postprocessing   | 1       | READY  |
+| llama3_preprocessing    | 1       | READY  |
+| llama3_tensorrt_llm     | 1       | READY  |
 +------------------+---------+--------+
 
 I0522 14:51:21.500442 381 metrics.cc:877] Collecting metrics for GPU 0: NVIDIA GeForce RTX 3090
@@ -193,7 +171,7 @@ I0522 14:51:21.502673 381 tritonserver.cc:2538]
 | server_extensions                | classification sequence model_repository model_repository(unload_depen |
 |                                  | dents) schedule_policy model_configuration system_shared_memory cuda_s |
 |                                  | hared_memory binary_tensor_data parameters statistics trace logging    |
-| model_repository_path[0]         | /app/model_repos/llama3_ifb                            |
+| model_repository_path[0]         | /app/model_repos                            |
 | model_control_mode               | MODE_NONE                                                              |
 | strict_model_config              | 1                                                                      |
 | rate_limit                       | OFF                                                                    |
@@ -228,14 +206,16 @@ curl -v localhost:8000/v2/health/ready
 
 ```
 
-## Test runs
+## 1.3 Test runs
 
 We can now start to test the Triton inference server by send HTTP request to the endpoint. On the host machine, run the following command to send a very simple request. You may notice the output is not so great, the reason is because we didn't apply chat template to the input text.
+
+Notice here we are using `llama3_ensemble` as the ensemble model name, instead of the default `ensemble`.
 
 ```bash
 
 curl -H "Content-Type: application/json" \
-    -X POST localhost:8000/v2/models/ensemble/generate -d \
+    -X POST localhost:8000/v2/models/llama3_ensemble/generate -d \
     '{
         "text_input": "Tell me a short joke about a dog and a cat.",
         "parameters": {
@@ -250,7 +230,7 @@ curl -H "Content-Type: application/json" \
     "context_logits": 0.0,
     "cum_log_probs": 0.0,
     "generation_logits": 0.0,
-    "model_name": "ensemble",
+    "model_name": "llama3_ensemble",
     "model_version": "1",
     "output_log_probs": [
         0.0,
@@ -265,7 +245,6 @@ curl -H "Content-Type: application/json" \
     "text_output": " I'll try to come up with a joke on the spot.\n\nHere's a joke: Why did the dog and cat go to the vet?\n\nBecause they were feeling a little paws-itive!\n\nNow it's your turn! Can you come up with a joke about a dog and a cat? Go ahead and give it a try!<|eot_id|>"
 }
 
-
 ```
 
 We can try to add the proper chat template format to the text, which gives much better results.
@@ -273,7 +252,7 @@ We can try to add the proper chat template format to the text, which gives much 
 ```bash
 
 curl -H "Content-Type: application/json" \
-    -X POST localhost:8000/v2/models/ensemble/generate -d \
+    -X POST localhost:8000/v2/models/llama3_ensemble/generate -d \
     '{
         "text_input": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nTell me a short joke about a dog and a cat.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
         "parameters": {
@@ -288,7 +267,7 @@ curl -H "Content-Type: application/json" \
     "context_logits": 0.0,
     "cum_log_probs": 0.0,
     "generation_logits": 0.0,
-    "model_name": "ensemble",
+    "model_name": "llama3_ensemble",
     "model_version": "1",
     "output_log_probs": [
         0.0,
@@ -303,7 +282,6 @@ curl -H "Content-Type: application/json" \
     "text_output": "Why did the dog and cat go to the vet?\n\nBecause the cat was feeling paws-itive it had a doggone cold!<|eot_id|>"
 }
 
-
 ```
 
 Run more test
@@ -312,7 +290,7 @@ Run more test
 
 
 curl -H "Content-Type: application/json" \
-    -X POST localhost:8000/v2/models/ensemble/generate -d \
+    -X POST localhost:8000/v2/models/llama3_ensemble/generate -d \
     '{
         "text_input": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nHow do I count to nine in French?<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
         "parameters": {
@@ -328,7 +306,7 @@ curl -H "Content-Type: application/json" \
     "context_logits": 0.0,
     "cum_log_probs": 0.0,
     "generation_logits": 0.0,
-    "model_name": "ensemble",
+    "model_name": "llama3_ensemble",
     "model_version": "1",
     "output_log_probs": [
         0.0,
@@ -343,11 +321,12 @@ curl -H "Content-Type: application/json" \
     "sequence_start": false,
     "text_output": "Counting to nine in French is easy! Here it goes:\n\n1. Un (one)\n2. Deux (two)\n3. Trois (three)\n4. Quatre (four)\n5. Cinq (five)\n6. Six (six)\n7. Sept (seven)\n8. Huit (eight)\n9. Neuf (nine)\n\nVoilà!<|eot_id|>"
 }
+
 ```
 
 Streaming API
 
-To use the streaming API, we need to set the following properties inside the `tensorrt_llm\config.pbtxt`.
+To use the streaming API, make sure we have enabled the decoupled mode in `llama3_tensorrt_llm\config.pbtxt`.
 
 ```
 model_transaction_policy {
@@ -361,7 +340,7 @@ We can then run the test using this command:
 
 
 curl -H "Content-Type: application/json" \
-    -X POST localhost:8000/v2/models/ensemble/generate_stream -d \
+    -X POST localhost:8000/v2/models/llama3_ensemble/generate_stream -d \
     '{
         "text_input": "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\nHow do I count to nine in French?<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
         "parameters": {
@@ -374,49 +353,49 @@ curl -H "Content-Type: application/json" \
 
 # Output
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":0.0,"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"Count"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":0.0,"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"Count"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"ing"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"ing"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" to"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" to"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" nine"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" nine"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" in"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" in"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" French"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" French"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" is"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" is"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" easy"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" easy"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"!"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"!"}
 
 ...,
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" Ne"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" Ne"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"uf"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"uf"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" ("}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" ("}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"nine"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"nine"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":")\n\n"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":")\n\n"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"Vo"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"Vo"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"il"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"il"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"à"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"à"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"!"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"!"}
 
-data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"<|eot_id|>"}
+data: {"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":"<|eot_id|>"}
 
 ```
 
-## Benchmark the Triton inference server
+## 1.4 Benchmark the Triton inference server
 
 On the host machine or other client, run the following command to do a quick concurrency test:
 
@@ -442,14 +421,14 @@ curl localhost:8002/metrics
 
 ```
 
-## Enable Token usage in Response
+## 1.5 Enable Token usage in Response
 
 If you want to enable token usage information like what the openAI API does, we need to make some changes to the model configurations and code.
 
 **Note**
-As of Triton server release `24.04` and `Triton Server Version 2.45.0`, we can only enable this if decouped mode is disabled. This means we can't use streaming feature.
+As of Triton server release `24.04` and `Triton Server Version 2.45.0`, we can only enable this if decoupled mode is disabled. This means we can't use streaming feature.
 
-**Step 1** Add custom input and output fields to the `postprocessing` model.
+**Step 1** Add custom input and output fields to the `llama3_postprocessing` model.
 
 ```
 input [
@@ -478,7 +457,7 @@ output [
 ]
 ```
 
-Then adjust the code inside `postprocessing\1\model.py`
+Then adjust the code inside `llama3_postprocessing\1\model.py`
 
 ```python
 
@@ -527,7 +506,7 @@ class TritonPythonModel:
 
 ```
 
-**Step 2** Change the `ensemble\config.pbtxt` file to add new output fields and map them in the pipeline
+**Step 2** Change the `llama3_ensemble\config.pbtxt` file to add new output fields and map them in the pipeline
 
 ```
 
@@ -550,7 +529,7 @@ ensemble_scheduling {
     ...
 
     {
-      model_name: "postprocessing"
+      model_name: "llama3_postprocessing"
       model_version: -1
       input_map {
         key: "INPUT_TOKENS_LEN"
@@ -559,7 +538,7 @@ ensemble_scheduling {
 
       ...
 
-            output_map {
+      output_map {
         key: "INPUT_TOKENS_LEN"
         value: "input_tokens_len"
       }
@@ -573,7 +552,7 @@ ensemble_scheduling {
 
 ```
 
-Now we need to disable the decouped mode in side the `tensorrt_llm/config.pbtxt` file
+We need to disable the decoupled mode in side the `llama3_tensorrt_llm/config.pbtxt` file
 
 ```
 model_transaction_policy {
@@ -581,24 +560,212 @@ model_transaction_policy {
 }
 ```
 
-
-
 If we send a request to the ensemble model, we should be able to get the input and output token length fields.
 
 ```bash
 
 curl -H "Content-Type: application/json" \
-    -X POST localhost:8000/v2/models/ensemble/generate -d \
+    -X POST localhost:8000/v2/models/llama3_ensemble/generate -d \
     '{
         "text_input": "Tell me a short joke about a dog and a cat.",        "parameters": {
         "max_tokens": 256,
         "stop_words":["<|eot_id|>"]
-        }              
+        }
     }'
 
 
 # output
-{"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"input_tokens_len":12,"model_name":"ensemble","model_version":"1","output_log_probs":[0.0,0.0, ..., 0.0,0.0,0.0],"output_tokens_len":69,"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" I'll try to come up with a joke on the spot.\n\nHere's a joke: Why did the dog and cat go to the vet?\n\nBecause they were feeling a little paws-itive!\n\nNow it's your turn! Can you come up with a joke about a dog and a cat? Go ahead and give it a try!<|eot_id|>"}
+{"context_logits":0.0,"cum_log_probs":0.0,"generation_logits":0.0,"input_tokens_len":12,"model_name":"llama3_ensemble","model_version":"1","output_log_probs":[0.0,0.0, ..., 0.0,0.0,0.0],"output_tokens_len":69,"sequence_end":false,"sequence_id":0,"sequence_start":false,"text_output":" I'll try to come up with a joke on the spot.\n\nHere's a joke: Why did the dog and cat go to the vet?\n\nBecause they were feeling a little paws-itive!\n\nNow it's your turn! Can you come up with a joke about a dog and a cat? Go ahead and give it a try!<|eot_id|>"}
+
+
+```
+
+# 2. Embedding model
+
+We now focus on how to deploy the ONNX format of the Sentence Transformer embedding model.
+
+Compared to deploy LLM, the ONNX format is much simpler. As we only need to download the Triton server with `onnxruntime` backend and place the model files inside the model repository.
+
+Since we're deploying the models on a single server, and our previous Triton container only supports `python` and `tensorrtllm` backends. We then need to manually prepare the `onnxruntime` backend.
+
+We can either:
+
+- Build from source by following the guide on https://github.com/triton-inference-server/onnxruntime_backend
+- Pull a Triton server image that supports `onnxruntime` native, such as one `nvcr.io/nvidia/tritonserver:24.04-py3`
+
+In our case, we chose the second option, since the build from source didn't work in our machine. We're prepare the `onnxruntime` folder at the root of `deploy_triton_server`. And we have a simple command to copy the backend to the container during docker build.
+
+```bash
+
+# Copy ONNX backend to container as this is required for the Stentence Transformer model
+COPY ./onnxruntime /opt/tritonserver/backends/onnxruntime
+
+```
+
+And we then need to rebuild the container
+
+```bash
+
+cd deploy_triton_server
+
+docker-compose build
+
+docker-compose up
+
+```
+
+Although these should already been take cared in the build models phase, but we need to make sure the following:
+
+- Check we have the BERT tokenizer checkpoint saved from HF inside the `app/local_tokenizers/bert` directory.
+- The `app/model_repos/st_embedding` have the ONNX model file and `config.pbtxt`.
+- The `app/model_repos/st_preprocessing` have the preprocessing model file and `config.pbtxt`.
+
+  ```bash
+
+  cd deploy_triton_server
+
+  cp ./src/st_preprocessing_model.py app/model_repos/st_preprocessing/1/model.py
+
+  ```
+
+
+Then we can create the ensemble model and configuration file for the embedding model.
+
+```bash
+
+cd deploy_triton_server
+
+mkdir -p app/model_repos/st_ensemble/1
+
+
+touch app/model_repos/st_ensemble/1/.tmp
+
+touch app/model_repos/st_ensemble/config.pbtxt
+
+```
+
+
+
+
+And copy the following content to `st_ensemble/config.pbtxt`
+
+```bash
+
+name: "st_ensemble"
+platform: "ensemble"
+max_batch_size: 128
+input {
+  name: "input"
+  data_type: TYPE_STRING
+  dims: [-1]
+}
+output {
+  name: "embedding"
+  data_type: TYPE_FP32
+  dims: [384]
+}
+ensemble_scheduling {
+  step [
+    {
+      model_name: "st_preprocessing"
+      model_version: -1
+      input_map {
+        key: "QUERY"
+        value: "input"
+      }
+      output_map {
+        key: "INPUT_ID"
+        value: "_INPUT_ID"
+      }
+      output_map {
+        key: "ATTENTION_MASK"
+        value: "_ATTENTION_MASK"
+      }
+    },
+    {
+      model_name: "st_embedding"
+      model_version: -1
+      input_map {
+        key: "input_ids"
+        value: "_INPUT_ID"
+      }
+      input_map {
+        key: "attention_mask"
+        value: "_ATTENTION_MASK"
+      }
+      output_map {
+        key: "output"
+        value: "embedding"
+      }
+    }
+  ]
+}
+
+
+
+```
+
+
+
+
+
+
+
+And then we can restart the Triton server container and test the embedding service.
+
+
+
+```bash
+
+cd deploy_triton_server
+
+docker-compose build
+
+docker-compose up
+
+
+
+
+triton-server-1  | I0526 14:15:36.769835 93 server.cc:677] 
+triton-server-1  | +-----------------------+---------+--------+
+triton-server-1  | | Model                 | Version | Status |
+triton-server-1  | +-----------------------+---------+--------+
+triton-server-1  | | llama3_ensemble       | 1       | READY  |
+triton-server-1  | | llama3_postprocessing | 1       | READY  |
+triton-server-1  | | llama3_preprocessing  | 1       | READY  |
+triton-server-1  | | llama3_tensorrt_llm   | 1       | READY  |
+triton-server-1  | | st_embedding          | 1       | READY  |
+triton-server-1  | | st_ensemble           | 1       | READY  |
+triton-server-1  | | st_preprocessing      | 1       | READY  |
+triton-server-1  | +-----------------------+---------+--------+
+
+...
+
+triton-server-1  | 
+triton-server-1  | I0526 14:15:36.821645 93 grpc_server.cc:2463] Started GRPCInferenceService at 0.0.0.0:8001
+triton-server-1  | I0526 14:15:36.821919 93 http_server.cc:4692] Started HTTPService at 0.0.0.0:8000
+triton-server-1  | I0526 14:15:36.862779 93 http_server.cc:362] Started Metrics Service at 0.0.0.0:8002
+
+```
+
+
+
+
+Try to send a request to the embedding ensemble model
+
+```bash
+
+curl -H "Content-Type: application/json" \
+    -X POST localhost:8000/v2/models/st_ensemble/generate -d \
+    '{
+        "input": "Tell me a short joke about a dog and a cat."
+    }'
+
+
+
+# output
+
+{"embedding":[-0.008819580078125,0.06964111328125,0.03753662109375, ..., 0.0694580078125,0.0772705078125,0.049957275390625,0.058563232421875],"model_name":"st_ensemble","model_version":"1","sequence_end":false,"sequence_id":0,"sequence_start":false}
 
 
 ```

@@ -1,10 +1,7 @@
 # 1. Preparation
 
-## 1.1 Download Llama3 model and tokenizer checkpoints
 
-Please refer to Meta's llama3 repository on how to download the native model and tokenizer checkpoints (not based on HuggingFace).
-
-## 1.2 Install Docker on Host OS
+## 1.1 Install Docker on Host OS
 
 Install the Docker runtime on the host machine, the following is an example of installing docker on OpenSUSE linux.
 
@@ -53,16 +50,20 @@ sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
-# 2. Build an optimized TensorRT-LLM model engine
+# 2. Build optimized model engines
 
 Before we can serve our LLM model for inference using Triton inference server, we need to build an optimized TensorRT engine (more precisely TensorRT-LLM engine). An engine is simple the optimized computation model/graph, along with all the weights. This process is often a trial-and-error process, which may involve multiple iterations.
 
-Please refer to `build_trtllm_engine`, where you can follow the instructions inside `build_trtllm_engine/README.md` on how to build a optimal TensorRT-LLM engine.
+In addition to build a engine for llama3 chat model, we will also need to build an open-source text embedding model, such as the one from SentenceTransformers, we'll export the SentenceTransformers model to ONNX format.
 
-# 3. Deploy the TensorRT-LLM model engine to Triton inference server
+Please refer to `build_models`, where you can follow the instructions inside `build_models/README.md` on how to build a optimal TensorRT-LLM engine.
+
+# 3. Deploy the model engines to Triton inference server
 
 Once we have an complied TensorRT-LLM model engine, we can then deploy the engine to Triton inference server.
 The Triton server will utilize TensorRT-LLM-Backend to serve the engine, along with some preprocessing and postprocessing tasks (text encode and token decode).
+
+In addition, to deploy TensorRT-LLM model engine, we'll also deploy the ONNX model for the text embedding model.
 
 Please refer to `deploy_triton_server`, where you can follow the instructions inside `deploy_triton_server/README.md` on how to deploy the engine with Triton inference server.
 
@@ -72,4 +73,4 @@ Since the Triton inference server focus on low-level computation and optimizatio
 
 To solve this issue, we create a simple API gateway server using FastAPI, which provide similar API design to the openAI API.
 
-Please refer to `deploy_triton_server`, where you can follow the instructions inside `deploy_api_server/README.md` on how to deploy the API gateway server based on FastAPI for openAI API compatibilities.
+Please refer to `deploy_api_server`, where you can follow the instructions inside `deploy_api_server/README.md` on how to deploy the API gateway server based on FastAPI for openAI API compatibilities.

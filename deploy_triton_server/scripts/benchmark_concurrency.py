@@ -200,7 +200,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--url", type=str, default='http://localhost:8000/v2/models/ensemble/generate_stream', help="Triton server URL"
+        "--url", type=str, default='http://localhost:8000/v2/models/llama3_ensemble/generate_stream', help="Triton server URL"
     )
     parser.add_argument(
         "--tokenizer_path", type=str, default='./src/tokenizer.model', help=""

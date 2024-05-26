@@ -1,0 +1,24 @@
+services:
+  tensorrtllm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tensorrtllm-image:v0.9.0
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ${PWD}:/workspace   # `build_llm` workspace
+      - /home/michael/dl_projects/TensorRT-LLM:/TensorRT-LLM  # TensorRT-LLM project codebase
+      - /home/michael/models/Llama3:/checkpoints  # Meta's llama3 checkpoints
+    working_dir: /TensorRT-LLM
+    entrypoint: /bin/bash   # optional, for interactive use
+    stdin_open: true  # docker run -i
+    tty: true         # docker run -t

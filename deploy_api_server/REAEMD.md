@@ -39,7 +39,7 @@ We can then test the API server by run the following command in the host machine
 curl http://localhost:3000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-     "model": "ensemble",
+     "model": "llama3",
      "messages": [{"role": "user", "content": "Tell me a short joke about dogs"}],
      "temperature": 0.7,
      "stream": true
@@ -47,6 +47,45 @@ curl http://localhost:3000/v1/chat/completions \
 
 
 ```
+
+Test embedding endpoint
+
+```bash
+
+curl http://localhost:3000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+     "model": "st_ensemble",
+     "input": "Tell me a short joke about dogs"
+   }'
+
+
+```
+
+## Test OpenAI python Client
+
+Our API server should also support requests from the native OpenAI python Client.
+
+We can use the following script to test OpenAI python Client
+
+```bash
+
+cd deploy_api_server
+
+python3 scripts/test_api_completion.py
+
+
+python3 scripts/test_api_completion.py --stream
+
+
+
+# For embedding
+
+python3 scripts/test_api_embedding.py
+
+```
+
+## Test with Demo Chat
 
 To further test the API server's compatibilities, we can use a very simple streamlit UI to check the connection and openAI API compatibilities.
 
@@ -60,6 +99,6 @@ pip3 install streamlit openai
 cd deploy_api_server
 
 
-streamlit run demo_ui.py
+streamlit run scripts/demo_chat.py
 
 ```

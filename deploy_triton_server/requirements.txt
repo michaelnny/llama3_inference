@@ -2,3 +2,6 @@ numpy
 tiktoken
 protobuf
 blobfile
+
+# To load Sentence Transformer tokenizer
+transformers
