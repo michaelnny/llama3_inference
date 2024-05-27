@@ -17,10 +17,17 @@ from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 import google.protobuf.json_format
 import numpy as np
-import tritonclient.grpc as grpcclient
+
+# import tritonclient.grpc as grpcclient
+
+# Use aio for native async calls?
+# https://github.com/triton-inference-server/client/blob/main/src/python/examples/simple_grpc_aio_infer_client.py
+import tritonclient.grpc.aio as grpcclient
+
 import tritonclient.http as httpclient
 from tritonclient.grpc.service_pb2 import ModelInferResponse
-from tritonclient.utils import InferenceServerException, np_to_triton_dtype
+from tritonclient.utils import np_to_triton_dtype
+
 
 DEFAULT_STOP_WORDS = ["</s>", "<|end_of_text|>", "<|eot_id|>"]
 
@@ -31,7 +38,6 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     def __init__(
         self,
         client: "GrpcTritonClient",
-        model_name: str,
         request_id: str,
         force_batch: bool = False,
         stop_words: List[str] = ["</s>", "<|end_of_text|>", "<|eot_id|>"],
@@ -39,7 +45,6 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
         """Instantiate the generator class."""
         super().__init__()
         self._client = client
-        self.model_name = model_name
         self.request_id = request_id
         self._batch = force_batch
         self.stop_words = stop_words
@@ -51,11 +56,7 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     def __next__(self) -> str:
         """Return the next retrieved token."""
         val = self.get()
-        if (
-            val is None
-            or isinstance(val, InferenceServerException)
-            or val in self.stop_words
-        ):
+        if val is None or val in self.stop_words:
             self._stop_stream()
             raise StopIteration()
         return val
@@ -63,16 +64,8 @@ class StreamingResponseGenerator(queue.Queue[Optional[str]]):
     def _stop_stream(self) -> None:
         """Drain and shutdown the Triton stream."""
         self._client.stop_stream(
-            self.model_name, self.request_id, signal=not self._batch
+            "tensorrt_llm", self.request_id, signal=not self._batch
         )
-
-    def get_all_items(self) -> List[List[float]]:
-        """Retrieve all items from generator, incase not use streaming."""
-        items = [item for item in self]
-        if len(items) == 1:
-            return items[0]
-        else:
-            return None
 
 
 class EmbeddingResponseGenerator(queue.Queue[Optional[List[float]]]):
@@ -81,13 +74,11 @@ class EmbeddingResponseGenerator(queue.Queue[Optional[List[float]]]):
     def __init__(
         self,
         client: "GrpcTritonClient",
-        model_name: str,
         request_id: str,
     ) -> None:
         """Instantiate the generator class."""
         super().__init__()
         self._client = client
-        self.model_name = model_name
         self.request_id = request_id
 
     def __iter__(self) -> "EmbeddingResponseGenerator":
@@ -97,17 +88,9 @@ class EmbeddingResponseGenerator(queue.Queue[Optional[List[float]]]):
     def __next__(self) -> str:
         """Return the next retrieved token."""
         val = self.get()
-        if val is None or isinstance(val, InferenceServerException):
+        if val is None:
             raise StopIteration()
         return val
-
-    def get_all_items(self) -> List[List[float]]:
-        """Retrieve all items from generator"""
-        items = [item for item in self]
-        if len(items) == 1:
-            return items[0]
-        else:
-            return None
 
 
 class BaseTritonClient(abc.ABC):
@@ -156,21 +139,21 @@ class BaseTritonClient(abc.ABC):
         if not self._client.is_model_ready(model_name):
             raise RuntimeError(f"Failed to load {model_name} on Triton in {timeout}s")
 
-    def get_model_list(self) -> List[dict]:
+    async def get_model_list(self) -> List[dict]:
         """Get a list of models loaded in the triton server."""
-        res = self._client.get_model_repository_index(as_json=True)
+        res = await self._client.get_model_repository_index(as_json=True)
         models = res["models"] if "models" in res else []
         return models
 
-    def get_model_config(self, model_name: str) -> dict:
+    async def get_model_config(self, model_name: str) -> dict:
         """Get the model config."""
-        return self._client.get_model_config(model_name, as_json=True)["config"]
+        res = await self._client.get_model_config(model_name, as_json=True)
+        return res["config"]
 
-    def get_model_statistics(self, model_name: str) -> dict:
+    async def get_model_statistics(self, model_name: str) -> dict:
         """Get the model statistics."""
-        return self._client.get_inference_statistics(model_name, as_json=True)[
-            "model_stats"
-        ]
+        res = await self._client.get_inference_statistics(model_name, as_json=True)
+        return res["model_stats"]
 
     def _generate_stop_signals(
         self,
@@ -333,13 +316,13 @@ class GrpcTritonClient(BaseTritonClient):
         return generated_text
 
     @staticmethod
-    def _process_embedding_result(result: Dict[str, str]) -> np.array:
+    def _process_embedding_result(result: Dict[str, str]) -> List[List[float]]:
         """Post-process the result from the server."""
         message = ModelInferResponse()
         google.protobuf.json_format.Parse(json.dumps(result), message)
         infer_result = grpcclient.InferResult(message)
         np_res = infer_result.as_numpy("embedding")
-        return np_res
+        return np_res.tolist()
 
     def _stream_callback(
         self,
@@ -350,7 +333,6 @@ class GrpcTritonClient(BaseTritonClient):
     ) -> None:
         """Add streamed result to queue."""
         if error:
-            # print(error)
             result_queue.put(error)
         else:
             response_raw = result.get_response(as_json=True)
@@ -373,22 +355,20 @@ class GrpcTritonClient(BaseTritonClient):
 
     def _embedding_callback(
         self,
-        result_queue: EmbeddingResponseGenerator,
         result: Any,
         error: str,
     ) -> Union[List[List[float]], None]:
-
+        print(result)
+        print(error)
         if error:
-            # print(error)
-            result_queue.put(error)
+            return None
         else:
             response_raw = result.get_response(as_json=True)
             if "outputs" in response_raw:
-                response = self._process_embedding_result(response_raw)
-                result_queue.put(response)
-                result_queue.put(None)
+                # the very last response might have no output, just the final flag
+                return self._process_embedding_result(response_raw)
             else:
-                result_queue.put(None)
+                return None
 
     # pylint: disable-next=too-many-arguments
     def _send_prompt_streaming(
@@ -443,7 +423,7 @@ class GrpcTritonClient(BaseTritonClient):
             max_tokens = 1024
 
         result_queue = StreamingResponseGenerator(
-            self, model_name, request_id, force_batch=not stream, stop_words=stop_words
+            self, request_id, force_batch=not stream, stop_words=stop_words
         )
         inputs = self._generate_completion_inputs(
             prompt=prompt,
@@ -469,33 +449,42 @@ class GrpcTritonClient(BaseTritonClient):
         )
         return result_queue
 
-    def request_embedding(
+    async def request_embedding(
         self,
         model_name: str,
         input: Union[str, List[str]],
         request_id: Optional[str] = None,
-    ) -> EmbeddingResponseGenerator:
+    ) -> Union[List[List[float]], None]:
         """Request a streaming connection."""
-        if not self._client.is_model_ready(model_name):
+        if not await self._client.is_model_ready(model_name):
             raise RuntimeError("Cannot request streaming, model is not loaded")
 
         if not request_id:
             request_id = str(random.randint(1, 9999999))  # nosec
 
-        result_queue = EmbeddingResponseGenerator(self, model_name, request_id)
-
         inputs = self._generate_embedding_inputs(input=input)
         outputs = self._generate_embedding_outputs()
 
-        self._client.async_infer(
-            model_name=model_name,
-            inputs=inputs,
-            outputs=outputs,
-            request_id=request_id,
-            callback=partial(self._embedding_callback, result_queue),
-        )
+        try:
+            result = await self._client.infer(
+                model_name=model_name,
+                inputs=inputs,
+                outputs=outputs,
+                request_id=request_id,
+                # callback=self._embedding_callback,
+            )
 
-        return result_queue
+            response_raw = result.get_response(as_json=True)
+            if "outputs" in response_raw:
+                # the very last response might have no output, just the final flag
+                return self._process_embedding_result(response_raw)
+            else:
+                return None
+
+        except Exception as error:
+            return error
+
+        # return result.get_result()
 
     def stop_stream(
         self, model_name: str, request_id: str, signal: bool = True

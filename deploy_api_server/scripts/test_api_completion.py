@@ -1,6 +1,6 @@
 from openai import OpenAI
 import argparse
-
+import time
 
 def main():
 
@@ -30,6 +30,7 @@ def main():
             if content:
                 print(content)
                 response += content
+                time.sleep(0.05)
     else:
         # print(chat_completion.choices[0])
         response = chat_completion.choices[0].message.content

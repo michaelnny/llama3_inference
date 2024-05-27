@@ -1,6 +1,7 @@
 import argparse
 import logging
 from typing import List, AsyncGenerator, Union
+from contextlib import asynccontextmanager
 import traceback
 import uvicorn
 from fastapi import FastAPI, Request
@@ -33,9 +34,42 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-app = FastAPI()
+# Global variables
+client: GrpcTritonClient = None
+tokenizer: Tokenizer = None
+max_input_len: int = 512
 
-# Allow access in browser from RAG UI and Storybook (development)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initialize application")
+
+    global client
+    global tokenizer
+    global max_input_len
+
+    args = parser.parse_args()
+    max_input_len = max(max_input_len, args.max_input_len)
+    tokenizer = Tokenizer(args.tokenizer_path)
+    client = GrpcTritonClient(url=args.triton_server_url, verbose=args.verbose)
+
+    try:
+        # Try to call the Triton server to ensure everything is fine
+        print(f"Triton server model repositories: {client.get_model_list()}")
+    except Exception as error:
+        raise SystemError(error)
+
+    yield
+
+    logger.info("Closing connection to database")
+    await app.state.db_pool.close()
+    logger.info("Exit application")
+    pass
+
+
+app = FastAPI(lifespan=lifespan)
+
+# Allow all access in local development
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -44,10 +78,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-client: GrpcTritonClient = None
-tokenizer: Tokenizer = None
-max_input_len: int = 512
 
 
 @app.exception_handler(RequestValidationError)
@@ -128,11 +158,7 @@ async def chat_completions(
             return StreamingResponse(stream_results(), media_type="text/event-stream")
         else:
             # If not streaming, return the generated content directly
-            generated_content = ""
-            for response in result_queue:
-                if response is None:
-                    break
-                generated_content += response
+            generated_content = result_queue.get_all_items()
 
             choices = [
                 ChatCompletionResponseChoice(
@@ -142,16 +168,16 @@ async def chat_completions(
             ]
             return ChatCompletionResponse(model=request.model, choices=choices)
     except InferenceServerException as error:
-        print(error)
         traceback.print_exception(error)
+        print(error)
         return ErrorResponse(
             object="error",
             message=f"Error when try to make inference call: {str(error)}",
             code=500,
         )
     except Exception as error:
-        print(error)
         traceback.print_exception(error)
+        print(error)
         return ErrorResponse(
             object="error", message=f"Unknown error: {str(error)}", code=500
         )
@@ -169,10 +195,12 @@ async def create_embeddings(
     """
 
     try:
-        result = client.request_embedding(
+        result_queue = client.request_embedding(
             model_name=get_triton_server_model_name(request.model, for_embedding=True),
             input=request.input,
         )
+
+        result = result_queue.get_all_items()
 
         if result is None:
             return ErrorResponse(
@@ -181,45 +209,25 @@ async def create_embeddings(
                 code=500,
             )
         else:
-            batch_size = result.shape[0]
             embeddings = [
-                Embedding(index=i, embedding=result[i].tolist())
-                for i in range(batch_size)
+                Embedding(index=i, embedding=result[i]) for i in range(len(result))
             ]
             response = EmbeddingResponse(data=embeddings)
             return response
     except InferenceServerException as error:
-        print(error)
         traceback.print_exception(error)
+        print(error)
         return ErrorResponse(
             object="error",
             message=f"Error when try to make inference call: {str(error)}",
             code=500,
         )
     except Exception as error:
-        print(error)
         traceback.print_exception(error)
+        print(error)
         return ErrorResponse(
             object="error", message=f"Unknown error: {str(error)}", code=500
         )
-
-
-@app.on_event("startup")
-async def startup_event():
-    global client
-    global tokenizer
-    global max_input_len
-
-    args = parser.parse_args()
-    max_input_len = max(max_input_len, args.max_input_len)
-    tokenizer = Tokenizer(args.tokenizer_path)
-    client = GrpcTritonClient(url=args.triton_server_url, verbose=args.verbose)
-
-    try:
-        # Try to call the Triton server to ensure everything is fine
-        print(f"Triton server model repositories: {client.get_model_list()}")
-    except Exception as error:
-        raise SystemError(error)
 
 
 if __name__ == "__main__":

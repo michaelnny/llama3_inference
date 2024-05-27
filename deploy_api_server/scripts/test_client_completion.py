@@ -17,6 +17,49 @@ from app.utils.triton_client import GrpcTritonClient
 chat_template = "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{0}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
 
 
+def main():
+    FLAGS = parser.parse_args()
+
+    prompt = chat_template.format(FLAGS.query)
+
+    client = GrpcTritonClient(url=FLAGS.url, verbose=FLAGS.verbose)
+
+    # Display all available models
+    print(f"Model repositories: {client.get_model_list()}")
+    print(f"Model config: {client.get_model_config(FLAGS.model_name)}")
+    print(f"Model statistics: {client.get_model_statistics(FLAGS.model_name)}")
+
+    try:
+        result_queue = client.request_completion_streaming(
+            model_name=FLAGS.model_name,
+            prompt=prompt,
+            stop_words=["</s>", "<|end_of_text|>", "<|eot_id|>"],
+            max_tokens=FLAGS.max_gen_len,
+            stream=FLAGS.stream,
+            # temperature=0,
+            # top_k=1,
+            # top_p=0,
+            # repetition_penalty=1,
+            # length_penalty=1.0,
+            # seed=1,
+        )
+
+        # We then retrieve the results...
+        if FLAGS.stream:
+            for token in result_queue:
+                print(token)
+        else:
+            response = result_queue.get_all_items()
+            print(response)
+
+        print("PASS")
+        print(f"Model statistics: {client.get_model_statistics(FLAGS.model_name)}")
+
+    except InferenceServerException as error:
+        print(error)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -70,40 +113,4 @@ if __name__ == "__main__":
         help="Stream timeout in seconds. Default is None.",
     )
 
-    FLAGS = parser.parse_args()
-    
-    prompt = chat_template.format(FLAGS.query)
-
-    client = GrpcTritonClient(url=FLAGS.url, verbose=FLAGS.verbose)
-
-    # Display all available models
-    print(f"Model repositories: {client.get_model_list()}")
-    print(f"Model config: {client.get_model_config(FLAGS.model_name)}")
-    print(f"Model statistics: {client.get_model_statistics(FLAGS.model_name)}")
-
-    try:
-        result_queue = client.request_completion_streaming(
-            model_name=FLAGS.model_name,
-            prompt=prompt,
-            stop_words=["</s>", "<|end_of_text|>", "<|eot_id|>"],
-            max_tokens=FLAGS.max_gen_len,
-            stream=FLAGS.stream,
-            # temperature=0,
-            # top_k=1,
-            # top_p=0,
-            # repetition_penalty=1,
-            # length_penalty=1.0,
-            # seed=1,
-        )
-
-        # We then retrieve the results...
-        for token in result_queue:
-            print(token)
-            if token == None:
-                break
-
-        print(f"Model statistics: {client.get_model_statistics(FLAGS.model_name)}")
-
-    except InferenceServerException as error:
-        print(error)
-        sys.exit(1)
+    main()
