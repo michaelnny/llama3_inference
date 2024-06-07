@@ -4,6 +4,8 @@
 import os
 from logging import getLogger
 from pathlib import Path
+import json
+import re
 from typing import (
     AbstractSet,
     cast,
@@ -15,6 +17,7 @@ from typing import (
     Sequence,
     TypedDict,
     Union,
+    Any,
 )
 
 import tiktoken
@@ -24,7 +27,7 @@ from tiktoken.load import load_tiktoken_bpe
 logger = getLogger(__name__)
 
 
-Role = Literal["system", "user", "assistant"]
+Role = Literal['system', 'user', 'assistant', 'tool']
 
 
 class Message(TypedDict):
@@ -58,37 +61,32 @@ class Tokenizer:
         mergeable_ranks = load_tiktoken_bpe(model_path)
         num_base_tokens = len(mergeable_ranks)
         special_tokens = [
-            "<|begin_of_text|>",
-            "<|end_of_text|>",
-            "<|reserved_special_token_0|>",
-            "<|reserved_special_token_1|>",
-            "<|reserved_special_token_2|>",
-            "<|reserved_special_token_3|>",
-            "<|start_header_id|>",
-            "<|end_header_id|>",
-            "<|reserved_special_token_4|>",
-            "<|eot_id|>",  # end of turn
-        ] + [
-            f"<|reserved_special_token_{i}|>"
-            for i in range(5, self.num_reserved_special_tokens - 5)
-        ]
-        self.special_tokens = {
-            token: num_base_tokens + i for i, token in enumerate(special_tokens)
-        }
+            '<|begin_of_text|>',
+            '<|end_of_text|>',
+            '<|reserved_special_token_0|>',
+            '<|reserved_special_token_1|>',
+            '<|reserved_special_token_2|>',
+            '<|reserved_special_token_3|>',
+            '<|start_header_id|>',
+            '<|end_header_id|>',
+            '<|reserved_special_token_4|>',
+            '<|eot_id|>',  # end of turn
+        ] + [f'<|reserved_special_token_{i}|>' for i in range(5, self.num_reserved_special_tokens - 5)]
+        self.special_tokens = {token: num_base_tokens + i for i, token in enumerate(special_tokens)}
         self.model = tiktoken.Encoding(
             name=Path(model_path).name,
             pat_str=self.pat_str,
             mergeable_ranks=mergeable_ranks,
             special_tokens=self.special_tokens,
         )
-        logger.info(f"Reloaded tiktoken model from {model_path}")
+        logger.info(f'Reloaded tiktoken model from {model_path}')
 
         self.n_words: int = self.model.n_vocab
 
         # BOS / EOS token IDs
-        self.bos_token: str = "<|begin_of_text|>"
-        self.eos_token: str = "<|end_of_text|>"
-        self.eot_token: str = "<|eot_id|>" # end of turn
+        self.bos_token: str = '<|begin_of_text|>'
+        self.eos_token: str = '<|end_of_text|>'
+        self.eot_token: str = '<|eot_id|>'  # end of turn
         self.bos_id: int = self.special_tokens[self.bos_token]
         self.eos_id: int = self.special_tokens[self.eos_token]
         self.pad_id: int = -1
@@ -96,9 +94,7 @@ class Tokenizer:
             self.special_tokens[self.eos_token],
             self.special_tokens[self.eot_token],
         }
-        logger.info(
-            f"#words: {self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}"
-        )
+        logger.info(f'#words: {self.n_words} - BOS ID: {self.bos_id} - EOS ID: {self.eos_id}')
 
     @property
     def vocab_size(self) -> int:
@@ -110,8 +106,8 @@ class Tokenizer:
         *,
         bos: bool = False,
         eos: bool = False,
-        allowed_special: Union[Literal["all"], AbstractSet[str]] = set(),
-        disallowed_special: Union[Literal["all"], Collection[str]] = (),
+        allowed_special: Union[Literal['all'], AbstractSet[str]] = set(),
+        disallowed_special: Union[Literal['all'], Collection[str]] = (),
     ) -> List[int]:
         """
         Encodes a string into a list of token IDs.
@@ -145,13 +141,7 @@ class Tokenizer:
         # of max consecutive non-whitespace or whitespace characters.
         MAX_NO_WHITESPACES_CHARS = 25_000
 
-        substrs = (
-            substr
-            for i in range(0, len(s), TIKTOKEN_MAX_ENCODE_CHARS)
-            for substr in self._split_whitespaces_or_nonwhitespaces(
-                s[i : i + TIKTOKEN_MAX_ENCODE_CHARS], MAX_NO_WHITESPACES_CHARS
-            )
-        )
+        substrs = (substr for i in range(0, len(s), TIKTOKEN_MAX_ENCODE_CHARS) for substr in self._split_whitespaces_or_nonwhitespaces(s[i : i + TIKTOKEN_MAX_ENCODE_CHARS], MAX_NO_WHITESPACES_CHARS))
         t: List[int] = []
         for substr in substrs:
             t.extend(
@@ -181,9 +171,7 @@ class Tokenizer:
         return self.model.decode(cast(List[int], t))
 
     @staticmethod
-    def _split_whitespaces_or_nonwhitespaces(
-        s: str, max_consecutive_slice_len: int
-    ) -> Iterator[str]:
+    def _split_whitespaces_or_nonwhitespaces(s: str, max_consecutive_slice_len: int) -> Iterator[str]:
         """
         Splits the string `s` so that each substring contains no more than `max_consecutive_slice_len`
         consecutive whitespaces or consecutive non-whitespaces.
@@ -213,25 +201,23 @@ class ChatFormat:
 
     def encode_header(self, message: Message) -> List[int]:
         tokens = []
-        tokens.append(self.tokenizer.special_tokens["<|start_header_id|>"])
-        tokens.extend(self.tokenizer.encode(message["role"], bos=False, eos=False))
-        tokens.append(self.tokenizer.special_tokens["<|end_header_id|>"])
-        tokens.extend(self.tokenizer.encode("\n\n", bos=False, eos=False))
+        tokens.append(self.tokenizer.special_tokens['<|start_header_id|>'])
+        tokens.extend(self.tokenizer.encode(message['role'], bos=False, eos=False))
+        tokens.append(self.tokenizer.special_tokens['<|end_header_id|>'])
+        tokens.extend(self.tokenizer.encode('\n\n', bos=False, eos=False))
         return tokens
 
     def encode_message(self, message: Message) -> List[int]:
         tokens = self.encode_header(message)
-        tokens.extend(
-            self.tokenizer.encode(message["content"].strip(), bos=False, eos=False)
-        )
-        tokens.append(self.tokenizer.special_tokens["<|eot_id|>"])
+        tokens.extend(self.tokenizer.encode(message['content'].strip(), bos=False, eos=False))
+        tokens.append(self.tokenizer.special_tokens['<|eot_id|>'])
         return tokens
 
     def encode_dialog_prompt(self, dialog: Dialog) -> List[int]:
         tokens = []
-        tokens.append(self.tokenizer.special_tokens["<|begin_of_text|>"])
+        tokens.append(self.tokenizer.special_tokens['<|begin_of_text|>'])
         for message in dialog:
             tokens.extend(self.encode_message(message))
         # Add the start of an assistant message for the model to complete.
-        tokens.extend(self.encode_header({"role": "assistant", "content": ""}))
+        tokens.extend(self.encode_header({'role': 'assistant', 'content': ''}))
         return tokens
